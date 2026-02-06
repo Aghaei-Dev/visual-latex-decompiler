@@ -220,8 +220,21 @@ def main():
 
     hist = {"tl": [], "vl": [], "vb": [], "ve": []}
     best_vloss = float("inf")
+    start_ep = 0
 
-    for ep in range(C.EPOCHS):
+    # Resume from checkpoint if available
+    ckpt_path = os.path.join(C.CHECKPOINT_DIR, "model_best.pt")
+    if os.path.exists(ckpt_path):
+        ckpt = torch.load(ckpt_path, map_location=dev)
+        model.load_state_dict(ckpt["model"])
+        optim.load_state_dict(ckpt["optim"])
+        start_ep = ckpt["epoch"]
+        best_vloss = ckpt["vl"]
+        for _ in range(start_ep):
+            sched.step()
+        print("Resumed from epoch {}, val_loss={:.4f}".format(start_ep, best_vloss))
+
+    for ep in range(start_ep, C.EPOCHS):
         t0 = time.time()
         tl = train_epoch(model, train_ld, loss_fn, optim, ep, dev)
         vl, vb, ve = validate(model, val_ld, loss_fn, vocab, dev)
