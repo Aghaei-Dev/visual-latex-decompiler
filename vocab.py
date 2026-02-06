@@ -70,26 +70,14 @@ class Vocab:
 
 def read_formulas(fpath):
     """
-    The formulas file has one formula per "block", with blank lines
-    separating them.  Each formula might span multiple lines, but
-    in practice they seem to be single-line.
-    Returns list of lists-of-tokens.
+    One formula per line. Returns list of lists-of-tokens.
     """
     formulas = []
-    buf = []
     with open(fpath, "r", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
-            if stripped == "":
-                if buf:
-                    formulas.append(buf)
-                    buf = []
-            else:
-                # each line's tokens just get appended
-                buf.extend(stripped.split())
-    # catch the last formula if file doesn't end with newline
-    if buf:
-        formulas.append(buf)
+            if stripped:
+                formulas.append(stripped.split())
     return formulas
 
 

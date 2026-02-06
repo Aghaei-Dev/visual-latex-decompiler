@@ -46,7 +46,7 @@ class FormulaDataset(Dataset):
         self.pairs = []  # (full_path, formula_index)
         for idx in range(len(self.formulas)):
             for ext in ("png", "jpg", "jpeg", "bmp"):
-                name = "{}.{}".format(idx, ext)
+                name = "{:05d}.{}".format(idx, ext)
                 if name in files_on_disk:
                     self.pairs.append((os.path.join(img_dir, name), idx))
                     break
