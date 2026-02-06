@@ -1,2 +1,27 @@
-# DATASET
+# dataset (too large for git)
 Data_Im2Latx/
+
+# generated files
+checkpoints/
+plots/
+test_formulas.txt
+vocab.pkl
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# virtual environment
+venv/
+env/
+.venv/
+.env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+MANUAL.md
+REPORT.md
