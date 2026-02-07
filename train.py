@@ -11,6 +11,7 @@ import config as C
 import nltk
 import matplotlib.pyplot as plt
 import os
+import shutil
 import time
 
 import torch
@@ -224,6 +225,8 @@ def main():
 
     # Resume from checkpoint if available
     ckpt_path = os.path.join(C.CHECKPOINT_DIR, "model_best.pt")
+    print("Looking for checkpoint:", ckpt_path,
+          "exists:", os.path.exists(ckpt_path))
     if os.path.exists(ckpt_path):
         ckpt = torch.load(ckpt_path, map_location=dev)
         model.load_state_dict(ckpt["model"])
@@ -263,6 +266,13 @@ def main():
                 "vocab_size": len(vocab),
             }, path)
             print("  saved:", path)
+
+            # Sync to Google Drive immediately (Colab only)
+            drive_ckpt = '/content/drive/MyDrive/CV_220704007/checkpoints'
+            if os.path.exists('/content/drive'):
+                os.makedirs(drive_ckpt, exist_ok=True)
+                shutil.copy2(path, drive_ckpt)
+                print("  synced to Drive!")
 
     plot_curves(hist)
     print("\n--- Done ---")
