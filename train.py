@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import os
 import shutil
 import time
+import warnings
 
 import torch
 import torch.nn as nn
@@ -237,8 +238,10 @@ def main():
         if "sched" in ckpt:
             sched.load_state_dict(ckpt["sched"])
         else:
-            for _ in range(ckpt["epoch"]):
-                sched.step()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                for _ in range(ckpt["epoch"]):
+                    sched.step()
         start_ep = ckpt["epoch"]
         best_vloss = ckpt["vl"]
         if "hist" in ckpt:
@@ -290,8 +293,11 @@ def main():
     plot_curves(hist)
     print("\n--- Done ---")
     print("Best val loss: {:.4f}".format(best_vloss))
-    print("Final BLEU:    {:.4f}".format(hist["vb"][-1]))
-    print("Final ED:      {:.4f}".format(hist["ve"][-1]))
+    if hist["vb"]:
+        print("Final BLEU:    {:.4f}".format(hist["vb"][-1]))
+        print("Final ED:      {:.4f}".format(hist["ve"][-1]))
+    else:
+        print("(No new epochs ran — metrics from checkpoint only)")
 
 
 if __name__ == "__main__":
