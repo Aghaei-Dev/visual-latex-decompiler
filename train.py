@@ -150,6 +150,9 @@ def train_epoch(model, loader, loss_fn, optim, epoch, dev):
 
 def plot_curves(hist):
     os.makedirs(C.PLOTS_DIR, exist_ok=True)
+    if not hist["tl"]:
+        print("No training history to plot.")
+        return
     eps = range(1, len(hist["tl"]) + 1)
 
     # loss
@@ -231,10 +234,18 @@ def main():
         ckpt = torch.load(ckpt_path, map_location=dev)
         model.load_state_dict(ckpt["model"])
         optim.load_state_dict(ckpt["optim"])
+        if "sched" in ckpt:
+            sched.load_state_dict(ckpt["sched"])
+        else:
+            for _ in range(ckpt["epoch"]):
+                sched.step()
         start_ep = ckpt["epoch"]
         best_vloss = ckpt["vl"]
-        for _ in range(start_ep):
-            sched.step()
+        if "hist" in ckpt:
+            hist = ckpt["hist"]
+        if start_ep >= C.EPOCHS:
+            print("Already trained {}/{} epochs. Increase EPOCHS in config.py to continue.".format(
+                start_ep, C.EPOCHS))
         print("Resumed from epoch {}, val_loss={:.4f}".format(start_ep, best_vloss))
 
     for ep in range(start_ep, C.EPOCHS):
@@ -262,6 +273,8 @@ def main():
                 "epoch": ep + 1,
                 "model": model.state_dict(),
                 "optim": optim.state_dict(),
+                "sched": sched.state_dict(),
+                "hist": hist,
                 "vl": vl, "vb": vb, "ve": ve,
                 "vocab_size": len(vocab),
             }, path)

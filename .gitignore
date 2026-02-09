@@ -1,9 +1,10 @@
 # dataset (too large for git)
 Data_Im2Latx/
+Data_Im2Latx.zip
+
 
 # generated files
 checkpoints/
-plots/
 test_formulas.txt
 vocab.pkl
 

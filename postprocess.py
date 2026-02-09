@@ -48,7 +48,8 @@ def fix_empty_args(text):
     """Replace \\cmd { } with \\cmd {~} so LaTeX doesn't choke."""
     for cmd in CMDS_WITH_ARG:
         pat = cmd + r"\s*\{\s*\}"
-        rep = cmd.replace("\\\\", "\\") + " {~}"
+        # cmd already has \\ which re.sub interprets as literal \
+        rep = cmd + " {~}"
         text = re.sub(pat, rep, text)
     return text
 
