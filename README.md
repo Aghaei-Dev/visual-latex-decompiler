@@ -4,6 +4,10 @@
 
 We need to convert a 64x256 grayscale image of a math formula into its LaTeX source code. This is an image-to-sequence problem: the input is a fixed-size image `64x256` but the output is a variable-length token sequence (:
 
+### before preceding check the file structure:
+
+![alt text](./images/ROUTING.png)
+
 ## 2. Dataset
 
 All data lives in the `Data_Im2Latx/` folder:
@@ -190,7 +194,8 @@ LaTeX token sequence
 
 attention to this point -> higher `BLEU` is better and lower the `Edit Distance` but in table its `Edit Distance Accuracy` so higher is better...
 
-have a look at this (i always say the truth!)
+### have a look at this (i always say the truth!)
+
 ![alt text](./images/BLEU_DISTANCE.png)
 
 ## 8. Decoding Strategies
@@ -213,7 +218,8 @@ The decoder sometimes produces invalid LaTeX. These cleanup steps fix that:
 | **Double script merge** | Two superscripts/subscripts in a row  | `x ^ {a} ^ {b}` --> `x ^ { a ^ { b } }`     |
 | **Math wrapping**       | Missing `$...$` delimiters (optional) | `x + y` --> `$ x + y $`                     |
 
-have a lok at this pic :
+### have a look at this pic:
+
 ![alt text](./images/POSTPROCCESS.png)
 
 ## 10. Attention vs No-Attention
