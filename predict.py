@@ -48,7 +48,12 @@ def main():
 
     predictions = []  # (sort_key, formula_str)
 
+    done = 0
+    total = len(ds)
     for imgs, fnames in loader:
+        done += imgs.size(0)
+        print("\r  {}/{} images ({:.0f}%)".format(done,
+              total, 100*done/total), end="", flush=True)
         imgs = imgs.to(dev)
         if opt.beam:
             seqs = model.beam_decode(

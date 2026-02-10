@@ -5,7 +5,6 @@ Data_Im2Latx.zip
 
 # generated files
 checkpoints/
-test_formulas.txt
 vocab.pkl
 
 # python
