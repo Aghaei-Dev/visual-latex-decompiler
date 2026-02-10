@@ -5,7 +5,6 @@ Data_Im2Latx.zip
 
 # generated files
 checkpoints/
-vocab.pkl
 
 # python
 __pycache__/
@@ -22,6 +21,3 @@ env/
 # OS
 .DS_Store
 Thumbs.db
-
-MANUAL.md
-REPORT.md
