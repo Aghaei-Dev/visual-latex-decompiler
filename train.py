@@ -1,8 +1,4 @@
-# train.py
-# Main training script.  Run:  python train.py
-#
-# Does everything: builds vocab, trains, validates, saves checkpoints,
-# plots the loss/bleu/edit-distance curves.
+# main training script.  Run:  python train.py
 
 from model import Im2Latex
 from dataset import FormulaDataset, collate_train
@@ -31,7 +27,6 @@ except LookupError:
 # ----- metric helpers -----
 
 def calc_bleu(refs, hyps, max_n=4):
-    """Average sentence-level BLEU across all samples."""
     total, cnt = 0.0, 0
     for r, h in zip(refs, hyps):
         n = min(max_n, len(r), len(h))
@@ -48,8 +43,8 @@ def calc_bleu(refs, hyps, max_n=4):
 
 
 def calc_edit_dist(refs, hyps):
-    """Normalized edit distance (our own implementation so we don't need
-    the `distance` pip package during training)."""
+    """own levenshtein so we dont need the distance package at train time.
+    single-row DP to save memory."""
     def _lev(a, b):
         na, nb = len(a), len(b)
         row = list(range(nb + 1))
@@ -76,7 +71,7 @@ def calc_edit_dist(refs, hyps):
 
 
 def get_tf_ratio(epoch):
-    """Linear decay of teacher forcing."""
+    # linear decay from TF_START to TF_END
     t = epoch / max(1, C.EPOCHS - 1)
     return C.TF_START + t * (C.TF_END - C.TF_START)
 
@@ -97,7 +92,7 @@ def validate(model, loader, loss_fn, vocab, dev):
         imgs, tgts = imgs.to(dev), tgts.to(dev)
         logits = model(imgs, tgts, tf_ratio=0.0)
 
-        # loss: skip the SOS column
+        # skip SOS column for loss
         loss = loss_fn(
             logits[:, 1:].reshape(-1, logits.size(-1)),
             tgts[:, 1:].reshape(-1),
@@ -105,7 +100,6 @@ def validate(model, loader, loss_fn, vocab, dev):
         tot_loss += loss.item()
         n += 1
 
-        # also greedy-decode for BLEU/edit
         preds = model.greedy(imgs, vocab.sos_id, vocab.eos_id)
         for b in range(imgs.size(0)):
             ref_tok = vocab.decode(tgts[b].tolist())
@@ -227,7 +221,7 @@ def main():
     best_vloss = float("inf")
     start_ep = 0
 
-    # Resume from checkpoint if available
+    # resume from checkpoint if available
     ckpt_path = os.path.join(C.CHECKPOINT_DIR, "model_best.pt")
     print("Looking for checkpoint:", ckpt_path,
           "exists:", os.path.exists(ckpt_path))

@@ -1,5 +1,4 @@
-# dataset.py
-# PyTorch datasets for loading image-formula pairs and test images.
+# pytorch datasets for loading the image-formula pairs.
 
 import os
 import glob
@@ -15,13 +14,12 @@ from vocab import Vocab, read_formulas
 
 
 def make_transform(training=False):
-    """Build image preprocessing pipeline."""
     t = [
         transforms.Grayscale(1),
         transforms.Resize((C.IMG_H, C.IMG_W)),
     ]
     if training:
-        # small augmentation so the model doesn't overfit too fast
+        # very light augmentation so the model doesn't over-fits too fast -- cant go higher or the formulas get distorted
         t.append(transforms.RandomAffine(degrees=1, translate=(0.02, 0.02)))
     t.append(transforms.ToTensor())          # -> [0,1]
     t.append(transforms.Normalize([0.5], [0.5]))  # -> [-1,1]
@@ -29,21 +27,16 @@ def make_transform(training=False):
 
 
 class FormulaDataset(Dataset):
-    """
-    Training / validation set.
-    Each image filename is just {index}.png where index corresponds
-    to the line number (0-based) in the formulas txt file.
-    """
+    """train/val set. image filename = formula index (e.g. 00042.png -> line 42)."""
 
     def __init__(self, img_dir, formulas_path, vocab, training=False):
         self.vocab = vocab
         self.tfm = make_transform(training)
-
         self.formulas = read_formulas(formulas_path)
 
-        # match images to their formulas
+        # match images on disk to their formula index
         files_on_disk = set(os.listdir(img_dir))
-        self.pairs = []  # (full_path, formula_index)
+        self.pairs = []
         for idx in range(len(self.formulas)):
             for ext in ("png", "jpg", "jpeg", "bmp"):
                 name = "{:05d}.{}".format(idx, ext)
@@ -68,7 +61,7 @@ class FormulaDataset(Dataset):
 
 
 class TestDataset(Dataset):
-    """Test images only -- no labels."""
+    """test images only -- no labels."""
 
     def __init__(self, img_dir):
         self.tfm = make_transform(training=False)
@@ -77,7 +70,6 @@ class TestDataset(Dataset):
         everything = [p for p in everything if os.path.splitext(p)[
             1].lower() in ok_ext]
 
-        # sort numerically by filename
         def num_key(p):
             n = os.path.splitext(os.path.basename(p))[0]
             try:
@@ -97,9 +89,8 @@ class TestDataset(Dataset):
         return self.tfm(img), os.path.basename(p)
 
 
-# --- collate fns for DataLoader ---
-
 def collate_train(batch):
+    # pad target sequences to same length in the batch
     imgs, tgts = zip(*batch)
     imgs = torch.stack(imgs, 0)
     lens = torch.tensor([len(t) for t in tgts])

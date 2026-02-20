@@ -1,12 +1,5 @@
-# model.py
-# The full encoder-decoder network.
-#
-# Structure based on the paper "What You Get Is What You See" by Deng et al.:
-#   1) CNN extracts a feature map from the image
-#   2) Bidirectional LSTM reads the feature map columns (row encoder)
-#   3) LSTM decoder generates tokens one at a time
-#
-# The attention module (Bahdanau-style) is optional -- controlled by USE_ATTN.
+# encoder-decoder network for image-to-latex.
+# based on "What You Get Is What You See"
 
 import torch
 import torch.nn as nn
@@ -19,7 +12,7 @@ import config as C
 # ===========
 
 class ConvEncoder(nn.Module):
-    """Stack of Conv-BN-ReLU-Pool blocks."""
+    """stack of conv-bn-relu-pool blocks."""
 
     def __init__(self):
         super().__init__()
@@ -36,7 +29,6 @@ class ConvEncoder(nn.Module):
         self.backbone = nn.Sequential(*layers)
 
     def forward(self, x):
-        # x: (B, 1, H, W)  ->  (B, C', H', W')
         return self.backbone(x)
 
 
@@ -45,10 +37,6 @@ class ConvEncoder(nn.Module):
 # ===============
 
 class RowEncoder(nn.Module):
-    """
-    Reads columns of the feature map as a sequence.
-    Each column is flattened (channels * height) and fed into a biLSTM.
-    """
 
     def __init__(self, n_channels, feat_h):
         super().__init__()
@@ -62,8 +50,9 @@ class RowEncoder(nn.Module):
         )
 
     def forward(self, fmap):
+        # reshape feature map so each column becomes a timestep
+        # (B, C, H, W) -> (B, W, C*H) then feed into biLSTM
         B, Ch, H, W = fmap.shape
-        # treat each column as a timestep: (B, W, Ch*H)
         seq = fmap.permute(0, 3, 1, 2).reshape(B, W, Ch * H)
         out, states = self.lstm(seq)
         return out, states  # out: (B, W, ENC_HIDDEN*2)
@@ -73,8 +62,10 @@ class RowEncoder(nn.Module):
 #  Attention
 # ==============
 
+#  i want the additional score :)
+
 class Attention(nn.Module):
-    """Bahdanau (additive) attention."""
+    """bahdanau additive attention."""
 
     def __init__(self, enc_dim, dec_dim, att_dim):
         super().__init__()
@@ -83,7 +74,6 @@ class Attention(nn.Module):
         self.v = nn.Linear(att_dim, 1, bias=False)
 
     def forward(self, enc_out, h_dec):
-        # enc_out: (B, L, enc_dim),  h_dec: (B, dec_dim)
         e = self.We(enc_out)                     # (B, L, att)
         d = self.Wd(h_dec).unsqueeze(1)          # (B, 1, att)
         scores = self.v(torch.tanh(e + d))       # (B, L, 1)
@@ -97,7 +87,6 @@ class Attention(nn.Module):
 # ============
 
 class Decoder(nn.Module):
-    """LSTM decoder, optionally using attention."""
 
     def __init__(self, n_vocab, enc_dim, use_attn=True):
         super().__init__()
@@ -119,12 +108,12 @@ class Decoder(nn.Module):
             self.attn = None
             self.out_proj = nn.Linear(C.DEC_HIDDEN, n_vocab)
 
-        # learnable init for the LSTM state, derived from encoder
+        # init decoder state from encoder mean instead of zeros --
+        # gives the decoder a head start with a summary of the image
         self.fc_h0 = nn.Linear(enc_dim, C.DEC_HIDDEN)
         self.fc_c0 = nn.Linear(enc_dim, C.DEC_HIDDEN)
 
     def init_hidden(self, enc_out):
-        """Create initial (h, c) from the mean of encoder outputs."""
         avg = enc_out.mean(dim=1)
         h = torch.tanh(self.fc_h0(avg)).unsqueeze(
             0).expand(C.DEC_LAYERS, -1, -1).contiguous()
@@ -133,7 +122,6 @@ class Decoder(nn.Module):
         return h, c
 
     def step(self, tok, hidden, enc_out):
-        """One decoding step.  tok: (B,)"""
         emb = self.drop(self.embed(tok))       # (B, EMBED)
         h_last = hidden[0][-1]                 # (B, DEC_HIDDEN)
 
@@ -156,17 +144,17 @@ class Decoder(nn.Module):
         return logits, hidden, aw
 
     def forward(self, enc_out, targets, tf_ratio=1.0):
-        """Full sequence decoding with teacher forcing."""
+        """teacher-forced decoding. tf_ratio controls how often we
+        feed ground truth vs the models own prediction."""
         B, T = targets.shape
         hidden = self.init_hidden(enc_out)
 
         all_logits = torch.zeros(B, T, self.n_vocab, device=targets.device)
-        inp = targets[:, 0]  # should be SOS
+        inp = targets[:, 0]  # SOS
 
         for t in range(1, T):
             logits, hidden, _ = self.step(inp, hidden, enc_out)
             all_logits[:, t] = logits
-            # teacher forcing decision
             if torch.rand(1).item() < tf_ratio:
                 inp = targets[:, t]
             else:
@@ -179,13 +167,12 @@ class Decoder(nn.Module):
 # ==================
 
 class Im2Latex(nn.Module):
-    """End-to-end: image -> CNN -> row LSTM -> decoder -> tokens."""
+    """end-to-end: image -> CNN -> biLSTM -> decoder -> tokens."""
 
     def __init__(self, vocab_size):
         super().__init__()
         self.cnn = ConvEncoder()
 
-        # figure out spatial dims after pooling
         n_pools = len(C.CNN_FILTERS)
         self.fh = C.IMG_H // (2 ** n_pools)
         self.fw = C.IMG_W // (2 ** n_pools)
@@ -202,7 +189,6 @@ class Im2Latex(nn.Module):
 
     @torch.no_grad()
     def greedy(self, imgs, sos, eos, max_len=None):
-        """Greedy decoding -- pick argmax at each step."""
         max_len = max_len or C.MAX_SEQ
         features = self.cnn(imgs)
         enc, _ = self.encoder(features)
@@ -232,10 +218,8 @@ class Im2Latex(nn.Module):
 
     @torch.no_grad()
     def beam_decode(self, imgs, sos, eos, beam_k=None, max_len=None):
-        """
-        Beam search.  Does one image at a time inside the batch
-        (simpler to implement, still fast enough for inference).
-        """
+        """beam search -- keeps top k candidates at each step.
+        does one image at a time (simpler than batched beam)."""
         beam_k = beam_k or C.BEAM_K
         max_len = max_len or C.MAX_SEQ
 
@@ -246,11 +230,11 @@ class Im2Latex(nn.Module):
         results = []
 
         for b in range(B):
-            enc_b = enc[b:b+1]  # (1, L, dim)
+            enc_b = enc[b:b+1]
             h0 = self.decoder.init_hidden(enc_b)
             start = torch.tensor([sos], device=dev)
 
-            # each beam: (token_list, cumul_log_prob, hidden, finished)
+            # (token_list, cumul_log_prob, hidden, finished)
             beams = [([], 0.0, h0, False)]
 
             for _ in range(max_len):

@@ -1,7 +1,6 @@
-# predict.py
-# Generate LaTeX predictions for the test images.
+# generate latex predictions for test images.
 #
-# Usage:
+# usage:
 #   python predict.py                          # greedy
 #   python predict.py --beam                   # beam search
 #   python predict.py --beam --postprocess     # beam + cleanup
@@ -46,7 +45,7 @@ def main():
     loader = DataLoader(ds, C.BATCH, shuffle=False,
                         num_workers=C.WORKERS, collate_fn=collate_test)
 
-    predictions = []  # (sort_key, formula_str)
+    predictions = []
 
     done = 0
     total = len(ds)
@@ -66,7 +65,6 @@ def main():
             formula = " ".join(toks)
             if opt.postprocess:
                 formula = clean_latex(formula)
-            # figure out sort order from filename
             base = os.path.splitext(fnames[i])[0]
             try:
                 key = int(base)

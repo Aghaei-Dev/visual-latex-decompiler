@@ -1,8 +1,6 @@
-# config.py
-# =========
-# I keep all the paths and hyperparams in one place
-# so I don't have to dig through multiple files every time
-# I want to change something.
+# all the paths and hyper-params lives here.
+# whenever i want to change something i just come here easy and nice :)
+# instead of hunting through every file.
 
 import os
 
@@ -21,34 +19,34 @@ VOCAB_PATH = os.path.join(BASE_DIR, "vocab.pkl")
 CHECKPOINT_DIR = os.path.join(BASE_DIR, "checkpoints")
 PLOTS_DIR = os.path.join(BASE_DIR, "plots")
 
-# --- image size (given in the assignment) ---
+# --- image size (you told us in the project details) ---
 IMG_H = 64
 IMG_W = 256
 IMG_CHANNELS = 1  # grayscale
 
-# --- special tokens for the vocabulary ---
+# --- special tokens for vocab ---
 PAD = "<PAD>"
 SOS = "<SOS>"
 EOS = "<EOS>"
 UNK = "<UNK>"
 
 # --- CNN ---
-# four conv blocks, each doubles the channel count
+# four conv blocks, doubles channels each time
 CNN_FILTERS = [64, 128, 256, 512]
 
-# --- row encoder (biLSTM over the CNN feature columns) ---
+# --- row encoder (biLSTM on top of CNN columns) ---
 ENC_HIDDEN = 256
 ENC_LAYERS = 1
 ENC_DROP = 0.1
 
-# --- decoder ---
+# --- decoder LSTM ---
 EMBED_DIM = 128
 DEC_HIDDEN = 512
 DEC_LAYERS = 1
 DEC_DROP = 0.2
-MAX_SEQ = 200   # longest sequence the decoder will ever produce
+MAX_SEQ = 200   # longest formula the decoder will generate
 
-# attention (set to False for the base model without attention)
+# attention toggle on/off  (set False for the no-attention baseline)
 USE_ATTN = True
 ATTN_DIM = 256
 
@@ -56,17 +54,18 @@ ATTN_DIM = 256
 BATCH = 32
 EPOCHS = 40
 LR = 1e-3
-LR_STEP = 10     # drop every N epochs
+LR_STEP = 10     # drop lr every N epochs
 LR_GAMMA = 0.5
-CLIP = 5.0    # gradient clipping
+CLIP = 5.0       # gradient clip
 
-TF_START = 1.0    # teacher-forcing ratio at start
-TF_END = 0.6    # ... at end
+# teacher forcing -- starts high, decays linearly to TF_END
+TF_START = 1.0
+TF_END = 0.6
 
-WORKERS = 2      # dataloader workers
+WORKERS = 2
 PIN_MEM = True
 
-# --- eval ---
+# --- eval stuff ---
 BLEU_N = 4
 LOG_INTERVAL = 50
 SAVE_BEST = True
