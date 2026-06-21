@@ -1,5 +1,7 @@
 # Image to LaTeX -- Project Report -- 220704007
 
+## TODO : Add Transformer Decoder for deep learning final project
+
 ## 1. Problem
 
 We need to convert a 64x256 grayscale image of a math formula into its LaTeX source code. This is an image-to-sequence problem: the input is a fixed-size image `64x256` but the output is a variable-length token sequence (:
