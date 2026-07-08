@@ -1,6 +1,6 @@
 # main training script.  Run:  python train.py
 
-from model import Im2Latex
+from model import build_model
 from dataset import FormulaDataset, collate_train
 from vocab import Vocab, build_vocab
 import config as C
@@ -206,10 +206,12 @@ def main():
     val_ld = DataLoader(val_ds,   C.BATCH, shuffle=False,
                         num_workers=C.WORKERS, pin_memory=C.PIN_MEM, collate_fn=collate_train)
 
-    # model
-    model = Im2Latex(len(vocab)).to(dev)
+    # model  (rnn or transformer, decided by C.MODEL_TYPE)
+    model = build_model(len(vocab)).to(dev)
+    print("Model type:", C.MODEL_TYPE)
     print("Parameters:", "{:,}".format(n_params(model)))
-    print("Attention:", C.USE_ATTN)
+    if C.MODEL_TYPE == "rnn":
+        print("Attention:", C.USE_ATTN)
 
     loss_fn = nn.CrossEntropyLoss(ignore_index=vocab.pad_id)
     optim = torch.optim.Adam(model.parameters(), lr=C.LR)
@@ -221,8 +223,11 @@ def main():
     best_vloss = float("inf")
     start_ep = 0
 
-    # resume from checkpoint if available
-    ckpt_path = os.path.join(C.CHECKPOINT_DIR, "model_best.pt")
+    # resume from checkpoint if available.
+    # the file name carries the method so the two models never clobber
+    # each other -- model_best_rnn.pt vs model_best_transformer.pt
+    ckpt_path = os.path.join(
+        C.CHECKPOINT_DIR, "model_best_{}.pt".format(C.MODEL_TYPE))
     print("Looking for checkpoint:", ckpt_path,
           "exists:", os.path.exists(ckpt_path))
     if os.path.exists(ckpt_path):
@@ -265,7 +270,8 @@ def main():
             best_vloss = vl
         if is_best or not C.SAVE_BEST:
             tag = "best" if is_best else "ep{}".format(ep+1)
-            path = os.path.join(C.CHECKPOINT_DIR, "model_{}.pt".format(tag))
+            path = os.path.join(
+                C.CHECKPOINT_DIR, "model_{}_{}.pt".format(tag, C.MODEL_TYPE))
             torch.save({
                 "epoch": ep + 1,
                 "model": model.state_dict(),
