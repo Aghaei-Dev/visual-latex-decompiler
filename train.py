@@ -150,15 +150,21 @@ def plot_curves(hist):
         return
     eps = range(1, len(hist["tl"]) + 1)
 
+    # per-method filenames so rnn and transformer runs don't clobber each
+    # other -- loss_rnn.png vs loss_transformer.png (same convention as the
+    # checkpoints and prediction files)
+    suffix = C.MODEL_TYPE
+
     # loss
     fig, ax = plt.subplots()
     ax.plot(eps, hist["tl"], label="train")
     ax.plot(eps, hist["vl"], label="val")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
-    ax.set_title("Loss")
+    ax.set_title("Loss ({})".format(suffix))
     ax.legend()
-    fig.savefig(os.path.join(C.PLOTS_DIR, "loss.png"), dpi=140)
+    fig.savefig(os.path.join(
+        C.PLOTS_DIR, "loss_{}.png".format(suffix)), dpi=140)
     plt.close(fig)
 
     # bleu
@@ -166,8 +172,9 @@ def plot_curves(hist):
     ax.plot(eps, hist["vb"], "g")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("BLEU")
-    ax.set_title("Validation BLEU")
-    fig.savefig(os.path.join(C.PLOTS_DIR, "bleu.png"), dpi=140)
+    ax.set_title("Validation BLEU ({})".format(suffix))
+    fig.savefig(os.path.join(
+        C.PLOTS_DIR, "bleu_{}.png".format(suffix)), dpi=140)
     plt.close(fig)
 
     # edit dist
@@ -175,8 +182,9 @@ def plot_curves(hist):
     ax.plot(eps, hist["ve"], "r")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Edit Dist")
-    ax.set_title("Validation Edit Distance")
-    fig.savefig(os.path.join(C.PLOTS_DIR, "edit_distance.png"), dpi=140)
+    ax.set_title("Validation Edit Distance ({})".format(suffix))
+    fig.savefig(os.path.join(
+        C.PLOTS_DIR, "edit_distance_{}.png".format(suffix)), dpi=140)
     plt.close(fig)
 
     print("Plots saved to", C.PLOTS_DIR)
