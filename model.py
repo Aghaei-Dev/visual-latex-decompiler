@@ -1,6 +1,8 @@
 # encoder-decoder network for image-to-latex.
 # based on "What You Get Is What You See"
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -262,3 +264,229 @@ class Im2Latex(nn.Module):
 
             results.append(beams[0][0])
         return results
+
+
+# =====================================================================
+#  METHOD 2 -- transformer seq2seq
+#  same cnn front-end as above, but the biLSTM row-encoder is swapped
+#  for a transformer encoder and the lstm+attention decoder for a
+#  transformer decoder.  so method 1 is fully recurrent, method 2 is
+#  fully attention-based -- that's the comparison we care about.
+# =====================================================================
+
+
+class PositionalEncoding(nn.Module):
+    """the classic sinusoidal position table (vaswani et al).
+    transformers have no idea about order on their own, so we add this."""
+
+    def __init__(self, d_model, max_len=512):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        pos = torch.arange(0, max_len).unsqueeze(1).float()
+        div = torch.exp(torch.arange(0, d_model, 2).float()
+                        * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(pos * div)
+        pe[:, 1::2] = torch.cos(pos * div)
+        self.register_buffer("pe", pe.unsqueeze(0))  # (1, max_len, d_model)
+
+    def forward(self, x):
+        # x: (B, L, d_model) -- just add the matching slice of the table
+        return x + self.pe[:, :x.size(1)]
+
+
+class TransformerEncoder(nn.Module):
+    """method 2's answer to the biLSTM row-encoder.
+
+    it reads the exact same column vectors (each column of the cnn feature
+    map, C*H numbers wide) but looks at all of them at once with
+    self-attention instead of stepping left-to-right."""
+
+    def __init__(self, n_channels, feat_h):
+        super().__init__()
+        d = C.TRANS_D_MODEL
+        self.in_proj = nn.Linear(n_channels * feat_h, d)
+        self.pos = PositionalEncoding(d)
+        self.drop = nn.Dropout(C.TRANS_DROP)
+        layer = nn.TransformerEncoderLayer(
+            d_model=d, nhead=C.TRANS_HEADS,
+            dim_feedforward=C.TRANS_FF, dropout=C.TRANS_DROP,
+            batch_first=True,
+        )
+        self.enc = nn.TransformerEncoder(layer, C.TRANS_ENC_LAYERS)
+
+    def forward(self, fmap):
+        # same column reshape the RowEncoder uses:
+        # (B, C, H, W) -> (B, W, C*H) so each column is one timestep
+        B, Ch, H, W = fmap.shape
+        seq = fmap.permute(0, 3, 1, 2).reshape(B, W, Ch * H)
+        x = self.in_proj(seq)
+        x = self.drop(self.pos(x))
+        return self.enc(x)  # (B, W, d_model)
+
+
+class TransformerDecoder(nn.Module):
+    """stack of transformer decoder blocks: masked self-attention over the
+    tokens so far + cross-attention onto the encoder memory."""
+
+    def __init__(self, n_vocab):
+        super().__init__()
+        self.n_vocab = n_vocab
+        d = C.TRANS_D_MODEL
+
+        self.embed = nn.Embedding(n_vocab, d, padding_idx=0)
+        # give the position table plenty of headroom -- training targets are
+        # data-driven, so size it well above MAX_SEQ so a long formula can't
+        # index past the end and crash a run.
+        self.pos = PositionalEncoding(d, max(C.MAX_SEQ, 512) + 2)
+        self.drop = nn.Dropout(C.TRANS_DROP)
+        self.scale = math.sqrt(d)  # scale the embeddings, as in the paper
+
+        layer = nn.TransformerDecoderLayer(
+            d_model=d, nhead=C.TRANS_HEADS,
+            dim_feedforward=C.TRANS_FF, dropout=C.TRANS_DROP,
+            batch_first=True,
+        )
+        self.dec = nn.TransformerDecoder(layer, C.TRANS_DEC_LAYERS)
+        self.out_proj = nn.Linear(d, n_vocab)
+
+    def _causal_mask(self, L, device):
+        # upper-triangular -inf so position t can't peek at t+1, t+2, ...
+        return torch.triu(
+            torch.full((L, L), float("-inf"), device=device), diagonal=1)
+
+    def decode(self, memory, dec_in):
+        """run the decoder once for the whole input sequence.
+        memory: (B, S, d_model)   dec_in: (B, L) token ids
+        returns logits (B, L, vocab)."""
+        emb = self.embed(dec_in) * self.scale
+        emb = self.drop(self.pos(emb))
+        mask = self._causal_mask(dec_in.size(1), dec_in.device)
+        pad = (dec_in == 0)  # PAD id is 0 -- don't attend to padding
+        h = self.dec(emb, memory, tgt_mask=mask, tgt_key_padding_mask=pad)
+        return self.out_proj(h)
+
+    def forward(self, memory, targets, tf_ratio=1.0):
+        """teacher-forced in one shot: feed tokens 0..T-2, predict 1..T-1.
+        tf_ratio is ignored on purpose -- a transformer reads the whole
+        shifted target at once, so it's always fully teacher forced. i keep
+        the argument only so train.py can call both models the same way."""
+        B, T = targets.shape
+        logits = self.decode(memory, targets[:, :-1])   # (B, T-1, vocab)
+        # line the outputs up with the rnn convention: slot t = prediction
+        # for token t, position 0 (SOS) left empty. keeps train.py's loss
+        # (logits[:, 1:] vs targets[:, 1:]) working for both models.
+        out = torch.zeros(B, T, self.n_vocab, device=targets.device)
+        out[:, 1:] = logits
+        return out
+
+
+class Im2LatexTransformer(nn.Module):
+    """end-to-end method 2: image -> CNN -> transformer enc -> transformer dec."""
+
+    def __init__(self, vocab_size):
+        super().__init__()
+        self.cnn = ConvEncoder()
+
+        n_pools = len(C.CNN_FILTERS)
+        self.fh = C.IMG_H // (2 ** n_pools)
+        self.fw = C.IMG_W // (2 ** n_pools)
+        fc = C.CNN_FILTERS[-1]
+
+        self.encoder = TransformerEncoder(fc, self.fh)
+        self.decoder = TransformerDecoder(vocab_size)
+
+    def _memory(self, imgs):
+        return self.encoder(self.cnn(imgs))
+
+    def forward(self, imgs, targets, tf_ratio=1.0):
+        return self.decoder(self._memory(imgs), targets, tf_ratio)
+
+    @torch.no_grad()
+    def greedy(self, imgs, sos, eos, max_len=None):
+        # feed SOS, take the last position's argmax, append, repeat.
+        # simple recompute-each-step -- clear over fast, fine for eval.
+        max_len = max_len or C.MAX_SEQ
+        mem = self._memory(imgs)
+        B = imgs.size(0)
+        dev = imgs.device
+
+        ys = torch.full((B, 1), sos, dtype=torch.long, device=dev)
+        done = [False] * B
+        seqs = [[] for _ in range(B)]
+
+        for _ in range(max_len):
+            logits = self.decoder.decode(mem, ys)   # (B, cur_len, vocab)
+            pred = logits[:, -1].argmax(1)           # next token per image
+            for b in range(B):
+                if done[b]:
+                    continue
+                p = pred[b].item()
+                if p == eos:
+                    done[b] = True
+                else:
+                    seqs[b].append(p)
+            ys = torch.cat([ys, pred.unsqueeze(1)], 1)
+            if all(done):
+                break
+        return seqs
+
+    @torch.no_grad()
+    def beam_decode(self, imgs, sos, eos, beam_k=None, max_len=None):
+        """beam search, one image at a time -- same idea as the rnn version,
+        we just re-run the whole decoder on each candidate instead of
+        carrying an lstm hidden state."""
+        beam_k = beam_k or C.BEAM_K
+        max_len = max_len or C.MAX_SEQ
+
+        mem_all = self._memory(imgs)
+        B = imgs.size(0)
+        dev = imgs.device
+        results = []
+
+        for b in range(B):
+            mem = mem_all[b:b+1]
+            # (token_list starting with SOS, cumul_log_prob, finished)
+            beams = [([sos], 0.0, False)]
+
+            for _ in range(max_len):
+                new_beams = []
+                for seq, score, fin in beams:
+                    if fin:
+                        new_beams.append((seq, score, True))
+                        continue
+                    ys = torch.tensor([seq], device=dev)
+                    logits = self.decoder.decode(mem, ys)
+                    lp = F.log_softmax(logits[:, -1], 1).squeeze(0)
+                    vals, ids = lp.topk(beam_k)
+                    for k in range(beam_k):
+                        tid = ids[k].item()
+                        ns = score + vals[k].item()
+                        if tid == eos:
+                            new_beams.append((seq, ns, True))
+                        else:
+                            new_beams.append((seq + [tid], ns, False))
+                new_beams.sort(key=lambda x: x[1], reverse=True)
+                beams = new_beams[:beam_k]
+                if all(f for _, _, f in beams):
+                    break
+
+            results.append(beams[0][0][1:])  # drop the leading SOS
+        return results
+
+
+# ==================
+#  Model factory
+# ==================
+
+def build_model(vocab_size):
+    """pick the network based on config.MODEL_TYPE.
+    "rnn"          -> method 1 (Im2Latex)
+    "transformer"  -> method 2 (Im2LatexTransformer)
+    train.py and predict.py both go through here so switching method is
+    just a one-line change in config.py."""
+    if C.MODEL_TYPE == "transformer":
+        return Im2LatexTransformer(vocab_size)
+    elif C.MODEL_TYPE == "rnn":
+        return Im2Latex(vocab_size)
+    raise ValueError("unknown MODEL_TYPE: {!r} (use 'rnn' or 'transformer')"
+                     .format(C.MODEL_TYPE))
