@@ -278,7 +278,7 @@ def main():
             print("  saved:", path)
 
             # Sync to Google Drive immediately (Colab only)
-            drive_ckpt = '/content/drive/MyDrive/CV_220704007/checkpoints'
+            drive_ckpt = '/content/drive/MyDrive/visual-latex-decompiler/checkpoints'
             if os.path.exists('/content/drive'):
                 os.makedirs(drive_ckpt, exist_ok=True)
                 shutil.copy2(path, drive_ckpt)
