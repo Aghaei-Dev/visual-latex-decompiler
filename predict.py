@@ -13,17 +13,23 @@ from torch.utils.data import DataLoader
 import config as C
 from vocab import Vocab
 from dataset import TestDataset, collate_test
-from model import Im2Latex
+from model import build_model
 from postprocess import clean_latex
 
 
 def args():
     p = argparse.ArgumentParser()
     p.add_argument(
-        "--checkpoint", default=os.path.join(C.CHECKPOINT_DIR, "model_best.pt"))
+        "--checkpoint",
+        default=os.path.join(
+            C.CHECKPOINT_DIR, "model_best_{}.pt".format(C.MODEL_TYPE)))
     p.add_argument("--beam", action="store_true", help="use beam search")
     p.add_argument("--beam-width", type=int, default=C.BEAM_K)
-    p.add_argument("--output", default=C.OUTPUT_FORMULAS)
+    # per-method output so the two methods don't overwrite each other
+    p.add_argument(
+        "--output",
+        default=os.path.join(
+            C.BASE_DIR, "test_formulas_{}.txt".format(C.MODEL_TYPE)))
     p.add_argument("--postprocess", action="store_true", help="clean up LaTeX")
     return p.parse_args()
 
@@ -36,10 +42,11 @@ def main():
     vocab = Vocab.load()
 
     ckpt = torch.load(opt.checkpoint, map_location=dev)
-    model = Im2Latex(ckpt["vocab_size"]).to(dev)
+    model = build_model(ckpt["vocab_size"]).to(dev)
     model.load_state_dict(ckpt["model"])
     model.eval()
-    print("Loaded {} (epoch {})".format(opt.checkpoint, ckpt["epoch"]))
+    print("Loaded {} ({}, epoch {})".format(
+        opt.checkpoint, C.MODEL_TYPE, ckpt["epoch"]))
 
     ds = TestDataset(C.TEST_IMAGES_DIR)
     loader = DataLoader(ds, C.BATCH, shuffle=False,
