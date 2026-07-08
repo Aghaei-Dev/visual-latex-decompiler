@@ -34,7 +34,7 @@ UNK = "<UNK>"
 # "rnn"          -> method 1: biLSTM encoder + lstm decoder with attention - Computer Vision Project (Dr.Adeleh Bitarafan) 4041
 # "transformer"  -> method 2: transformer encoder + transformer decoder, same cnn front-end - Deep Learning Project (Dr.Kazem Fouladi) 4042
 # just change this and re-run train.py / predict.py, the rest follows.
-MODEL_TYPE = "rnn"
+MODEL_TYPE = "transformer"
 
 # --- CNN ---
 # four conv blocks, doubles channels each time  (shared by both methods)
