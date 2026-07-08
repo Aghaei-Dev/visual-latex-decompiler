@@ -1,6 +1,18 @@
-# Image to LaTeX -- Project Report -- 220704007
+# Image to LaTeX - Computer Vision and Deep Leraning Project
 
-## TODO : Add Transformer Decoder for deep learning final project
+## 0. Project Scope -- Two Methods
+
+This project started as a computer-vision project (CNN + biLSTM + attention). For
+the deep-learning course i extended it to solve the **same** image -> LaTeX problem
+a **second** way and compare the two methods.
+
+- **Method 1 -- RNN seq2seq:** CNN + biLSTM encoder + LSTM decoder with Bahdanau attention (the computer-vision project).
+- **Method 2 -- Transformer seq2seq:** the same CNN front-end, but a Transformer encoder + Transformer decoder instead of the recurrent parts (deep learning project).
+
+Both methods share the exact same data, vocabulary, preprocessing and evaluation
+pipeline -- only the sequence model changes, so the comparison is fair. To switch
+method, set `MODEL_TYPE` in `config.py` to `"rnn"` or `"transformer"` and re-run.
+The head-to-head numbers are in the comparison table in **section 7.7**.
 
 ## 1. Problem
 
@@ -33,7 +45,10 @@ in simpler way the line number of .txt are the filename of each image.
 
 ## 3. Neural Network Architecture
 
-Based on Deng et al. (2016), "What You Get Is What You See." The model has three main parts connected in a pipeline:
+Two architectures share the same CNN front-end. **Method 1** (sections 3.1-3.5)
+is the original RNN model based on Deng et al. (2016), "What You Get Is What You
+See." **Method 2** (sections 3.6-3.9) keeps the CNN but swaps the recurrent parts
+for a Transformer. Method 1 has three main parts connected in a pipeline:
 
 ```bash
 Image (1x64x256) --> [CNN Encoder] --> [Row Encoder (biLSTM)] --> [Decoder (LSTM + Attention)] --> LaTeX tokens
@@ -128,6 +143,85 @@ Input image (B, 1, 64, 256)
 LaTeX token sequence
 ```
 
+### 3.6 Method 2 -- Transformer (overview)
+
+**Idea:** keep the CNN (it just turns pixels into features -- both methods need
+that) but replace the _sequence_ part. Method 1 is fully recurrent: a biLSTM reads
+the feature columns and an LSTM generates tokens. Method 2 is fully
+attention-based: a Transformer encoder reads the feature columns and a Transformer
+decoder generates tokens. so the comparison is really **recurrence vs
+self-attention** for this task.
+
+```bash
+Image (1x64x256) --> [CNN Encoder] --> [Transformer Encoder] --> [Transformer Decoder] --> LaTeX tokens
+```
+
+The CNN is byte-for-byte the same `ConvEncoder`, so its output is still
+`(B, 512, 4, 16)`, and the 16 columns are flattened to 2048-dim vectors exactly
+like the biLSTM sees them -- that's on purpose so both encoders get identical input.
+
+### 3.7 Transformer Encoder (`TransformerEncoder` in model.py)
+
+**What it does:** the same job as the biLSTM row encoder -- turn the 16 column
+features into context-aware vectors -- but it looks at all 16 columns at once with
+self-attention instead of stepping left-to-right.
+
+**How it works:**
+
+1. Each of the 16 columns (2048-dim) is linearly projected to `d_model = 512`
+2. A sinusoidal positional encoding is added (a transformer has no built-in sense
+   of order, so we tell it which column is which)
+3. `TRANS_ENC_LAYERS = 4` transformer encoder blocks (multi-head self-attention +
+   feed-forward) process the sequence
+
+**Output:** sequence of 16 vectors, each 512-dim -- same shape as the biLSTM's
+output, so the decoder doesn't care which encoder produced it.
+
+### 3.8 Transformer Decoder (`TransformerDecoder` in model.py)
+
+**What it does:** generates LaTeX tokens one at a time, same as the LSTM decoder,
+but with masked self-attention over the tokens-so-far plus cross-attention onto
+the encoder memory.
+
+**Each block has:**
+
+1. **Masked self-attention** -- each position can only look at earlier tokens (a
+   causal mask), so the model can't cheat by seeing the future during training
+2. **Cross-attention** -- attends to the 16 encoder vectors (this is the
+   transformer's version of the Bahdanau attention: "which part of the image
+   matters for the next token")
+3. **Feed-forward** -- a small MLP applied per position
+
+Token embeddings (512-dim) are scaled by sqrt(d_model) and get their own
+positional encoding before the blocks. A final linear layer projects to
+vocabulary logits. `TRANS_DEC_LAYERS = 4` blocks, `TRANS_HEADS = 8` attention heads.
+
+**Training vs inference:** during training the whole shifted target is fed at once
+and the causal mask does the rest, so it's fully teacher-forced and parallel (no
+step-by-step loop -- much faster per epoch than the RNN). At inference we decode
+one token at a time (greedy or beam) exactly like method 1.
+
+### 3.9 Full Method-2 Summary (`Im2LatexTransformer` in model.py)
+
+```bash
+Input image (B, 1, 64, 256)
+        |
+   ConvEncoder            -- 4x [Conv3x3 + BN + ReLU + Pool2x2]  (shared with method 1)
+        |                  -- output: (B, 512, 4, 16)
+        v
+   TransformerEncoder     -- flatten columns + positional enc + 4x self-attention blocks
+        |                  -- output: (B, 16, 512)
+        v
+   TransformerDecoder     -- 4x [masked self-attn + cross-attn + FFN]
+        |                  -- generates tokens autoregressively
+        v
+LaTeX token sequence
+```
+
+`build_model()` in `model.py` returns `Im2Latex` or `Im2LatexTransformer` based on
+`config.MODEL_TYPE`, so `train.py` and `predict.py` don't need to know which method
+they're running.
+
 ## 4. Hyperparameters (config.py)
 
 **Why each value was chosen:**
@@ -152,20 +246,43 @@ LaTeX token sequence
 
 **Loss function:** Cross-entropy, ignoring PAD tokens (index 0) and the SOS position. This is standard for sequence generation -- it penalizes the model for each wrong token prediction.
 
+### 4.1 Method-2 (Transformer) Hyperparameters
+
+These live in `config.py` too and only affect Method 2. i kept `d_model = 512`
+equal to the biLSTM encoder's output width so the two methods stay roughly the
+same size and the comparison is fair.
+
+| Parameter              | Value                     | Why                                                                                                                  |
+| ---------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **`MODEL_TYPE`**       | `"rnn"` / `"transformer"` | the one switch that picks which method to build, train and predict with.                                             |
+| **`TRANS_D_MODEL`**    | 512                       | model width. matches the biLSTM encoder output (256x2) so the sizes are comparable, and divisible by the head count. |
+| **`TRANS_HEADS`**      | 8                         | multi-head attention splits 512 into 8 heads of 64 each. standard ratio.                                             |
+| **`TRANS_FF`**         | 2048                      | feed-forward width inside each block (4x d_model, the usual transformer ratio).                                      |
+| **`TRANS_ENC_LAYERS`** | 4                         | encoder self-attention blocks (replaces the single biLSTM layer).                                                    |
+| **`TRANS_DEC_LAYERS`** | 4                         | decoder blocks. deep enough to model 200-token formulas, light enough for a T4.                                      |
+| **`TRANS_DROP`**       | 0.1                       | dropout inside the transformer. BN in the shared CNN already regularizes the front-end.                              |
+
+everything else (batch size, epochs, Adam, LR schedule, gradient clip, beam width)
+is **shared** with method 1 on purpose -- same training budget for both, so the
+comparison isn't skewed by tuning one harder than the other. note that teacher
+forcing does not apply to the transformer (it's always fully teacher-forced by
+design), so `TF_START` / `TF_END` are simply ignored when `MODEL_TYPE = "transformer"`.
+
 ## 5. Files -- What Each One Does
 
-| File               | Purpose                                                                                                                                                                                                                                                        |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.py`        | **All paths + hyperparameters in one place.** Change any setting here instead of digging through other files. Controls CNN size, LSTM dims, learning rate, batch size, attention on/off, etc.                                                                  |
-| `vocab.py`         | **Builds the token vocabulary.** Reads `train_formulas.txt`, collects all unique tokens, assigns each an integer ID. Provides `encode()` (tokens --> IDs) and `decode()` (IDs --> tokens). Saves/loads to `vocab.pkl` so it only builds once.                  |
-| `dataset.py`       | **PyTorch datasets + data loading.** `FormulaDataset` loads train/val image-formula pairs, applies preprocessing (resize, normalize, augment). `TestDataset` loads test images only (no labels). `collate_train` pads sequences to equal length in each batch. |
-| `model.py`         | **The neural network.** Contains all four components: `ConvEncoder` (CNN), `RowEncoder` (biLSTM), `Attention` (Bahdanau), `Decoder` (LSTM). Also implements `greedy()` and `beam_decode()` inference methods.                                                  |
-| `train.py`         | **Training loop.** Runs epochs, computes loss, validates, saves checkpoints, plots curves. Handles teacher forcing decay, learning rate scheduling, gradient clipping. Auto-resumes from checkpoint if one exists.                                             |
-| `predict.py`       | **Generates test predictions.** Loads the best checkpoint, runs inference on test images using greedy or beam search, optionally applies post-processing. Outputs `test_formulas.txt`.                                                                         |
-| `postprocess.py`   | **Cleans up generated LaTeX.** Fixes common decoder errors: unbalanced braces, empty arguments, double superscripts, repeated tokens (stuttering). Makes output actually compilable.                                                                           |
-| `bleu_score.py`    | **BLEU metric** (provided). Computes n-gram overlap between predictions and ground truth.                                                                                                                                                                      |
-| `edit_distance.py` | **Edit distance metric** (provided). Computes normalized Levenshtein distance between predictions and ground truth.                                                                                                                                            |
-| `run_all.ipynb`    | **Colab notebook** to run the full pipeline step by step: setup, train, evaluate, visualize.                                                                                                                                                                   |
+| File               | Purpose                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.py`        | **All paths + hyperparameters in one place.** Change any setting here instead of digging through other files. Controls CNN size, LSTM dims, learning rate, batch size, attention on/off, etc.                                                                                                                                                  |
+| `vocab.py`         | **Builds the token vocabulary.** Reads `train_formulas.txt`, collects all unique tokens, assigns each an integer ID. Provides `encode()` (tokens --> IDs) and `decode()` (IDs --> tokens). Saves/loads to `vocab.pkl` so it only builds once.                                                                                                  |
+| `dataset.py`       | **PyTorch datasets + data loading.** `FormulaDataset` loads train/val image-formula pairs, applies preprocessing (resize, normalize, augment). `TestDataset` loads test images only (no labels). `collate_train` pads sequences to equal length in each batch.                                                                                 |
+| `model.py`         | **Both neural networks.** Method 1: `ConvEncoder` (CNN), `RowEncoder` (biLSTM), `Attention` (Bahdanau), `Decoder` (LSTM). Method 2: `TransformerEncoder`, `TransformerDecoder`, `PositionalEncoding` (all on the same `ConvEncoder`). `build_model()` returns the right one based on `MODEL_TYPE`. Both expose `greedy()` and `beam_decode()`. |
+| `train.py`         | **Training loop.** Runs epochs, computes loss, validates, saves checkpoints, plots curves. Handles teacher forcing decay, learning rate scheduling, gradient clipping. Auto-resumes from checkpoint if one exists.                                                                                                                             |
+| `predict.py`       | **Generates test predictions.** Loads the best checkpoint, runs inference on test images using greedy or beam search, optionally applies post-processing. Outputs `test_formulas.txt`.                                                                                                                                                         |
+| `postprocess.py`   | **Cleans up generated LaTeX.** Fixes common decoder errors: unbalanced braces, empty arguments, double superscripts, repeated tokens (stuttering). Makes output actually compilable.                                                                                                                                                           |
+| `bleu_score.py`    | **BLEU metric** (provided). Computes n-gram overlap between predictions and ground truth.                                                                                                                                                                                                                                                      |
+| `edit_distance.py` | **Edit distance metric** (provided). Computes normalized Levenshtein distance between predictions and ground truth.                                                                                                                                                                                                                            |
+| `exact_match.py`   | **Exact-match metric.** Fraction of predictions whose whole token sequence exactly equals the ground truth. Same CLI as the other two metric scripts, used for both methods.                                                                                                                                                                   |
+| `run_all.ipynb`    | **Colab notebook** to run the full pipeline step by step for whichever method `MODEL_TYPE` selects: setup, train, evaluate, visualize. Flip `MODEL_TYPE` and re-run to do the other method.                                                                                                                                                    |
 
 ## 6. Metrics Explanation
 
@@ -173,15 +290,26 @@ LaTeX token sequence
 
 **Edit Distance** (Normalized Levenshtein): Minimum number of token insertions, deletions, or substitutions needed to convert the prediction into the reference, divided by the length of the longer sequence. We report **accuracy = 1 - normalized_distance**. Higher is better.
 
+**Exact Match:** The fraction of formulas the model gets **completely** right -- every token identical to the reference. This is the strictest metric (one wrong token = the whole formula counts as wrong), so it's always lower than BLEU or edit distance, but it directly answers "how often is the output perfect?" Computed by `exact_match.py`.
+
 ## 7. Training and Validation Results
 
 ### 7.1 Training Curves
 
-Below are the plots generated by `train.py` at the end of the 40-epoch run:
+Below are the plots generated by `train.py` at the end of the 40-epoch run.
+Each run writes per-method files (`loss_rnn.png` / `loss_transformer.png`,
+etc.), so switching `MODEL_TYPE` never overwrites the other method's curves.
+**Method 1 -- RNN (`rnn` run):**
 
-![Loss](plots/loss.png)
-![BLEU](plots/bleu.png)
-![Edit Distance](plots/edit_distance.png)
+![Loss](plots/loss_rnn.png)
+![BLEU](plots/bleu_rnn.png)
+![Edit Distance](plots/edit_distance_rnn.png)
+
+**Method 2 -- Transformer (`transformer` run):**
+
+![Loss](plots/loss_transformer.png)
+![BLEU](plots/bleu_transformer.png)
+![Edit Distance](plots/edit_distance_transformer.png)
 
 ### 7.2 Loss Curve Analysis (Epoch by Epoch)
 
@@ -247,15 +375,43 @@ attention to this point -> higher `BLEU` is better and lower the `Edit Distance`
 
 ### 7.6 Visual Comparison
 
-![Comparison](plots/comparison.png)
+**Method 1 -- RNN (`rnn` run):**
 
-the comparison plot shows 8 random validation samples. for each one you see the input image, the ground truth formula, and the models prediction. tokens that match are green, differences are red.
+![Comparison](plots/comparison_rnn.png)
+
+**Method 2 -- Transformer (`transformer` run):**
+
+![Comparison](plots/comparison_transformer.png)
+
+the comparison plot is written per-method (`comparison_rnn.png` /
+`comparison_transformer.png`). the comparison plot shows 8 random validation samples. for each one you see the input image, the ground truth formula, and the models prediction. tokens that match are green, differences are red.
 
 most samples come out fully green (exact match). the cases where there are differences tend to be:
 
 - very long formulas (100+ tokens) where the decoder starts drifting near the end. this is a known limitation of LSTM decoders -- the hidden state can only carry so much information and eventually it "forgets" what it was doing
 - visually similar symbols like `\nu` vs `v` or `\rho` vs `p` -- these look almost identical in the input image so its hard for the CNN to tell them apart
 - rare symbol combinations that don't appear often enough in the training data for the model to learn them reliably
+
+### 7.7 Method 1 vs Method 2 -- The Comparison
+
+This is the head-to-head the deep-learning course asks for. **Both models are
+trained and evaluated on the same data, vocabulary and splits**, with the same
+training budget, and scored with the same three scripts (`bleu_score.py`,
+`edit_distance.py`, `exact_match.py`) on the validation set.
+
+> Method-1 numbers are from the finished 40-epoch run. Method-2 numbers get filled
+> in after training with `MODEL_TYPE = "transformer"` -- the notebook prints every
+> value below. `# params` is printed by `train.py` at startup; train/inference time
+> you read off the run.
+
+| Metric                     | Method 1: CNN + biLSTM + Attention | Method 2: CNN + Transformer    |
+| -------------------------- | ---------------------------------- | ------------------------------ |
+| BLEU (4-gram)              | `0.831935`                         | `LATER WE FILL IT DON'T WORRY` |
+| Edit-Distance accuracy     | `0.868808`                         | `LATER WE FILL IT DON'T WORRY` |
+| Exact-Match accuracy       | `RUN exact_match.py`               | `LATER WE FILL IT DON'T WORRY` |
+| # Parameters               | `see train.py startup log`         | `see train.py startup log`     |
+| Training time              | `~ 18 hrs on T4`                   | `LATER WE FILL IT DON'T WORRY` |
+| Inference time (val, beam) | `LATER WE FILL IT DON'T WORRY`     | `LATER WE FILL IT DON'T WORRY` |
 
 ## 8. Decoding Strategies
 
@@ -304,13 +460,19 @@ The decoder sometimes produces invalid LaTeX. These cleanup steps fix that:
 
 1. Deng, Yuntian, Anssi Kanervisto, and Alexander M. Rush. "What you get is what you see: A visual markup decompiler." arXiv:1609.04938 (2016).
 
-2. Bahdanau, Dzmitry, Kyunghyun Cho, and Yoshua Bengio. "Neural machine translation by jointly learning to align and translate." ICLR 2015.
+2. Bahdanau, Dzmitry, Kyunghyun Cho, and Yoshua Bengio. "Neural machine translation by jointly learning to align and translate." ICLR 2015. arXiv:1409.0473.
 
-3. A Simple Overview of RNN, LSTM and Attention Mechanism `MEDIUM`
+3. Vaswani, Ashish, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, and Illia Polosukhin. "Attention is all you need." Advances in Neural Information Processing Systems (NeurIPS) 2017. arXiv:1706.03762. — the Transformer paper Method 2 is built on: the sinusoidal positional encoding (`PositionalEncoding`), the sqrt(d_model) embedding scaling, and the multi-head self-/cross-attention encoder-decoder blocks.
+
+4. Ba, Jimmy Lei, Jamie Ryan Kiros, and Geoffrey E. Hinton. "Layer normalization." arXiv:1607.06450 (2016). — the normalization used inside each Transformer block.
+
+5. Kingma, Diederik P., and Jimmy Ba. "Adam: A method for stochastic optimization." ICLR 2015. arXiv:1412.6980. — the optimizer used to train both methods.
+
+6. A Simple Overview of RNN, LSTM and Attention Mechanism `MEDIUM`
 
 ---
 
 ## 12. Who am I ?
 
 - **Student** : Hasan Aghaei
-- **Professor** : Dr.Adeleh Bitarafan
+- **Professor** : Dr.Adeleh Bitarafan (Method 1) and Dr.Kazem Fouladi (Method 2)
