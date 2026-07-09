@@ -70,7 +70,7 @@ TRANS_DROP = 0.1
 
 # --- training ---
 BATCH = 32
-EPOCHS = 40
+EPOCHS = 20
 LR = 1e-3
 LR_STEP = 10     # drop lr every N epochs
 LR_GAMMA = 0.5
