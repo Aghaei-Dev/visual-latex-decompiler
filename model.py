@@ -350,9 +350,10 @@ class TransformerDecoder(nn.Module):
         self.out_proj = nn.Linear(d, n_vocab)
 
     def _causal_mask(self, L, device):
-        # upper-triangular -inf so position t can't peek at t+1, t+2, ...
+        # bool mask (True = blocked) so a position can't see the future.
+        # keep it bool to match the pad mask, else torch warns.
         return torch.triu(
-            torch.full((L, L), float("-inf"), device=device), diagonal=1)
+            torch.ones(L, L, dtype=torch.bool, device=device), diagonal=1)
 
     def decode(self, memory, dec_in):
         """run the decoder once for the whole input sequence.
