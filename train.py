@@ -8,6 +8,7 @@ import nltk
 import matplotlib.pyplot as plt
 import os
 import shutil
+import sys
 import time
 import warnings
 
@@ -22,6 +23,35 @@ try:
     nltk.data.find("tokenizers/punkt")
 except LookupError:
     nltk.download("punkt", quiet=True)
+
+
+# ----- logging -----
+
+DRIVE_DIR = "/content/drive/MyDrive/visual-latex-decompiler"
+
+
+class Tee:
+    # print to the console and the log file at the same time
+    def __init__(self, path, stream):
+        self.stream = stream
+        self.file = open(path, "a")
+
+    def write(self, s):
+        self.stream.write(s)
+        self.file.write(s)
+
+    def flush(self):
+        self.stream.flush()
+        self.file.flush()
+
+
+def save_to_drive(path, subdir):
+    # same as the checkpoints, copy a file into the drive folder (colab only)
+    if not os.path.exists("/content/drive"):
+        return
+    dst = os.path.join(DRIVE_DIR, subdir)
+    os.makedirs(dst, exist_ok=True)
+    shutil.copy2(path, dst)
 
 
 # ----- metric helpers -----
@@ -193,6 +223,22 @@ def plot_curves(hist):
 # ----- main -----
 
 def main():
+    # send every print into logs/ as well so the whole run is saved
+    os.makedirs(C.LOGS_DIR, exist_ok=True)
+    log_path = os.path.join(
+        C.LOGS_DIR, "train_log_{}.txt".format(C.MODEL_TYPE))
+    real_stdout = sys.stdout
+    sys.stdout = Tee(log_path, real_stdout)
+    try:
+        run(log_path)
+    finally:
+        # flush + push the log even if i stop the run early
+        sys.stdout.flush()
+        save_to_drive(log_path, "logs")
+        sys.stdout = real_stdout
+
+
+def run(log_path):
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", dev)
 
@@ -273,6 +319,10 @@ def main():
         hist["vb"].append(vb)
         hist["ve"].append(ve)
 
+        # save the log to drive after every epoch so i can download it later
+        sys.stdout.flush()
+        save_to_drive(log_path, "logs")
+
         is_best = vl < best_vloss
         if is_best:
             best_vloss = vl
@@ -291,11 +341,9 @@ def main():
             }, path)
             print("  saved:", path)
 
-            # Sync to Google Drive immediately (Colab only)
-            drive_ckpt = '/content/drive/MyDrive/visual-latex-decompiler/checkpoints'
-            if os.path.exists('/content/drive'):
-                os.makedirs(drive_ckpt, exist_ok=True)
-                shutil.copy2(path, drive_ckpt)
+            # sync checkpoint to drive right away (colab only)
+            save_to_drive(path, "checkpoints")
+            if os.path.exists("/content/drive"):
                 print("  synced to Drive!")
 
     plot_curves(hist)

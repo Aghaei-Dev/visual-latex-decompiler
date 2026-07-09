@@ -18,6 +18,7 @@ OUTPUT_FORMULAS = os.path.join(BASE_DIR, "test_formulas.txt")
 VOCAB_PATH = os.path.join(BASE_DIR, "vocab.pkl")
 CHECKPOINT_DIR = os.path.join(BASE_DIR, "checkpoints")
 PLOTS_DIR = os.path.join(BASE_DIR, "plots")
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
 # --- image size (you told us in the project details) ---
 IMG_H = 64
