@@ -77,6 +77,9 @@ LR_STEP = 10     # drop lr every N epochs
 LR_GAMMA = 0.5
 CLIP = 5.0       # gradient clip
 
+# ramp the lr up over the first steps -- full lr from step 0 blows up to nan
+WARMUP_STEPS = 500
+
 # teacher forcing -- starts high, decays linearly to TF_END
 TF_START = 1.0
 TF_END = 0.6

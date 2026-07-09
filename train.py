@@ -57,6 +57,7 @@ def save_to_drive(path, subdir):
 # ----- metric helpers -----
 
 def calc_bleu(refs, hyps, max_n=4):
+    smooth = nltk.translate.bleu_score.SmoothingFunction().method1
     total, cnt = 0.0, 0
     for r, h in zip(refs, hyps):
         n = min(max_n, len(r), len(h))
@@ -64,7 +65,8 @@ def calc_bleu(refs, hyps, max_n=4):
             continue
         w = [1.0 / n] * n
         try:
-            s = nltk.translate.bleu_score.sentence_bleu([r], h, weights=w)
+            s = nltk.translate.bleu_score.sentence_bleu(
+                [r], h, weights=w, smoothing_function=smooth)
         except:
             s = 0.0
         total += s
@@ -145,10 +147,11 @@ def validate(model, loader, loss_fn, vocab, dev):
 
 # ----- one epoch of training -----
 
-def train_epoch(model, loader, loss_fn, optim, epoch, dev):
+def train_epoch(model, loader, loss_fn, optim, epoch, dev, gstep):
     model.train()
     tot_loss, n = 0.0, 0
     tf = get_tf_ratio(epoch)
+    skipped = 0
 
     for step, (imgs, tgts, lens) in enumerate(loader):
         imgs, tgts = imgs.to(dev), tgts.to(dev)
@@ -158,9 +161,35 @@ def train_epoch(model, loader, loss_fn, optim, epoch, dev):
             logits[:, 1:].reshape(-1, logits.size(-1)),
             tgts[:, 1:].reshape(-1),
         )
+
+        # if one batch goes nan and i let adam step on it, the m/v buffers get
+        # wrecked and then every step after that is nan too -- thats what killed
+        # my last run. so i just skip the bad batch and carry on.
+        if not torch.isfinite(loss):
+            optim.zero_grad(set_to_none=True)
+            gstep += 1
+            skipped += 1
+            continue
+
         loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), C.CLIP)
+        gnorm = nn.utils.clip_grad_norm_(model.parameters(), C.CLIP)
+        # clipping cant help if the grads are already nan (the norm is nan too),
+        # so i check it here as well before stepping.
+        if not torch.isfinite(gnorm):
+            optim.zero_grad(set_to_none=True)
+            gstep += 1
+            skipped += 1
+            continue
+
+        # warmup -- scale the lr up over the first WARMUP_STEPS, then leave it
+        # to the scheduler. the transformer hates getting the full lr on step 0.
+        if gstep < C.WARMUP_STEPS:
+            scale = (gstep + 1) / C.WARMUP_STEPS
+            for g in optim.param_groups:
+                g["lr"] = C.LR * scale
+
         optim.step()
+        gstep += 1
 
         tot_loss += loss.item()
         n += 1
@@ -168,7 +197,9 @@ def train_epoch(model, loader, loss_fn, optim, epoch, dev):
             print("  ep {} step {} loss={:.4f} tf={:.2f}".format(
                 epoch+1, step+1, tot_loss/n, tf))
 
-    return tot_loss / max(n, 1)
+    if skipped:
+        print("  ep {} skipped {} nan step(s)".format(epoch+1, skipped))
+    return tot_loss / max(n, 1), gstep
 
 
 # ----- plotting -----
@@ -304,9 +335,14 @@ def run(log_path):
                 start_ep, C.EPOCHS))
         print("Resumed from epoch {}, val_loss={:.4f}".format(start_ep, best_vloss))
 
+    # global optimizer-step counter drives the lr warmup. seed it from the
+    # resume point so a run continued past warmup doesn't warm up again.
+    gstep = start_ep * len(train_ld)
+
     for ep in range(start_ep, C.EPOCHS):
         t0 = time.time()
-        tl = train_epoch(model, train_ld, loss_fn, optim, ep, dev)
+        tl, gstep = train_epoch(
+            model, train_ld, loss_fn, optim, ep, dev, gstep)
         vl, vb, ve = validate(model, val_ld, loss_fn, vocab, dev)
         sched.step()
         dt = time.time() - t0
