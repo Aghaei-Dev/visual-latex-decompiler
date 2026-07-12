@@ -20,7 +20,9 @@ def make_transform(training=False):
     ]
     if training:
         # very light augmentation so the model doesn't over-fits too fast -- cant go higher or the formulas get distorted
-        t.append(transforms.RandomAffine(degrees=1, translate=(0.02, 0.02)))
+        # fill=255 -- shifted-in edges stay white, not ink-black
+        t.append(transforms.RandomAffine(
+            degrees=1, translate=(0.02, 0.02), fill=255))
     t.append(transforms.ToTensor())          # -> [0,1]
     t.append(transforms.Normalize([0.5], [0.5]))  # -> [-1,1]
     return transforms.Compose(t)

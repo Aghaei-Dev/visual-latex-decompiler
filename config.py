@@ -40,6 +40,9 @@ MODEL_TYPE = "transformer"
 # --- CNN ---
 # four conv blocks, doubles channels each time  (shared by both methods)
 CNN_FILTERS = [64, 128, 256, 512]
+# pool (h, w) per block -- only halve width twice (256 -> 64 columns) so the
+# decoder has enough feature columns to attend over
+CNN_POOLS = [(2, 2), (2, 2), (2, 1), (2, 1)]
 
 # --- row encoder (biLSTM on top of CNN columns) ---
 ENC_HIDDEN = 256
@@ -70,12 +73,15 @@ TRANS_DEC_LAYERS = 4  # decoder blocks (self-attention + cross-attention)
 TRANS_DROP = 0.1
 
 # --- training ---
-BATCH = 32
-EPOCHS = 20
-LR = 1e-3
+BATCH = 128      # fills more of the gpu than 32 and trains faster
+EPOCHS = 30
+LR = 3e-4 if MODEL_TYPE == "transformer" else 1e-3   # transformer needs it lower
 LR_STEP = 10     # drop lr every N epochs
 LR_GAMMA = 0.5
 CLIP = 5.0       # gradient clip
+LABEL_SMOOTH = 0.1
+
+USE_AMP = True   # mixed precision -- ~2x faster per step on the gpu
 
 # ramp the lr up over the first steps -- full lr from step 0 blows up to nan
 WARMUP_STEPS = 500
@@ -90,7 +96,9 @@ PIN_MEM = True
 # --- eval stuff ---
 BLEU_N = 4
 LOG_INTERVAL = 50
-SAVE_BEST = True
+# only decode this many val images for BLEU/edit-dist -- loss uses the full set
+VAL_DECODE_SAMPLES = 640
 
 # --- beam search ---
 BEAM_K = 5
+BEAM_LEN_NORM = 0.7  # score / len^alpha, else short beams always win

@@ -56,6 +56,10 @@ def fix_double_scripts(text):
     return text
 
 
+# runs of these are real, not stutter (digits like "1 1 1", nested "} } }")
+LEGIT_RUNS = set("0123456789{}()[].,|'") | {r"\prime"}
+
+
 def remove_stutters(text):
     # collapse 3+ identical tokens in a row to just 2
     tokens = text.split()
@@ -66,7 +70,7 @@ def remove_stutters(text):
             run += 1
         else:
             run = 0
-        if run < 2:
+        if run < 2 or t in LEGIT_RUNS:
             result.append(t)
     return " ".join(result)
 

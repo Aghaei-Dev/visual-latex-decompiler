@@ -20,18 +20,27 @@ class ConvEncoder(nn.Module):
         super().__init__()
         layers = []
         ch_in = C.IMG_CHANNELS
-        for ch_out in C.CNN_FILTERS:
+        for ch_out, pool in zip(C.CNN_FILTERS, C.CNN_POOLS):
             layers += [
                 nn.Conv2d(ch_in, ch_out, 3, padding=1),
                 nn.BatchNorm2d(ch_out),
                 nn.ReLU(True),
-                nn.MaxPool2d(2, 2),
+                nn.MaxPool2d(pool, pool),
             ]
             ch_in = ch_out
         self.backbone = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.backbone(x)
+
+
+def feat_hw():
+    # feature-map size after the cnn, from the per-block pool sizes
+    ph, pw = 1, 1
+    for a, b in C.CNN_POOLS:
+        ph *= a
+        pw *= b
+    return C.IMG_H // ph, C.IMG_W // pw
 
 
 # ===============
@@ -175,9 +184,7 @@ class Im2Latex(nn.Module):
         super().__init__()
         self.cnn = ConvEncoder()
 
-        n_pools = len(C.CNN_FILTERS)
-        self.fh = C.IMG_H // (2 ** n_pools)
-        self.fw = C.IMG_W // (2 ** n_pools)
+        self.fh, self.fw = feat_hw()
         fc = C.CNN_FILTERS[-1]
 
         self.encoder = RowEncoder(fc, self.fh)
@@ -262,7 +269,11 @@ class Im2Latex(nn.Module):
                 if all(fin for _, _, _, fin in beams):
                     break
 
-            results.append(beams[0][0])
+            # length-normalized final pick, else the shortest beam always wins
+            best = max(
+                beams,
+                key=lambda x: x[1] / max(1, len(x[0])) ** C.BEAM_LEN_NORM)
+            results.append(best[0])
         return results
 
 
@@ -388,9 +399,7 @@ class Im2LatexTransformer(nn.Module):
         super().__init__()
         self.cnn = ConvEncoder()
 
-        n_pools = len(C.CNN_FILTERS)
-        self.fh = C.IMG_H // (2 ** n_pools)
-        self.fw = C.IMG_W // (2 ** n_pools)
+        self.fh, self.fw = feat_hw()
         fc = C.CNN_FILTERS[-1]
 
         self.encoder = TransformerEncoder(fc, self.fh)
@@ -471,7 +480,11 @@ class Im2LatexTransformer(nn.Module):
                 if all(f for _, _, f in beams):
                     break
 
-            results.append(beams[0][0][1:])  # drop the leading SOS
+            # same length-norm as the rnn version (len-1: seq carries SOS)
+            best = max(
+                beams,
+                key=lambda x: x[1] / max(1, len(x[0]) - 1) ** C.BEAM_LEN_NORM)
+            results.append(best[0][1:])  # drop the leading SOS
         return results
 
 

@@ -54,6 +54,15 @@ def save_to_drive(path, subdir):
     shutil.copy2(path, dst)
 
 
+def restore_log_from_drive(log_path):
+    # pull the drive log back before appending, else the empty local log on a
+    # fresh vm overwrites it
+    src = os.path.join(DRIVE_DIR, "logs", os.path.basename(log_path))
+    if os.path.exists(src) and not os.path.exists(log_path):
+        shutil.copy2(src, log_path)
+        print("restored log from drive:", src)
+
+
 # ----- metric helpers -----
 
 def calc_bleu(refs, hyps, max_n=4):
@@ -119,25 +128,36 @@ def validate(model, loader, loss_fn, vocab, dev):
     model.eval()
     tot_loss, n = 0.0, 0
     all_r, all_h = [], []
+    decoded = 0
 
     for imgs, tgts, lens in loader:
         imgs, tgts = imgs.to(dev), tgts.to(dev)
-        logits = model(imgs, tgts, tf_ratio=0.0)
+        with torch.autocast("cuda", enabled=C.USE_AMP and dev.type == "cuda"):
+            logits = model(imgs, tgts, tf_ratio=0.0)
 
-        # skip SOS column for loss
-        loss = loss_fn(
-            logits[:, 1:].reshape(-1, logits.size(-1)),
-            tgts[:, 1:].reshape(-1),
-        )
+            # skip SOS column for loss
+            loss = loss_fn(
+                logits[:, 1:].reshape(-1, logits.size(-1)),
+                tgts[:, 1:].reshape(-1),
+            )
         tot_loss += loss.item()
         n += 1
 
-        preds = model.greedy(imgs, vocab.sos_id, vocab.eos_id)
-        for b in range(imgs.size(0)):
-            ref_tok = vocab.decode(tgts[b].tolist())
-            hyp_tok = vocab.decode(preds[b])
-            all_r.append(ref_tok)
-            all_h.append(hyp_tok)
+        # greedy decoding is the slow part (on colab i tried and each epoch has 40 min greedy check with best model and its awful!), so only do the first
+        # VAL_DECODE_SAMPLES images -- loss already covers the full set. cap
+        # the length near the longest target so a model that never emits EOS
+        # can't spin for MAX_SEQ steps every batch.
+        if decoded < C.VAL_DECODE_SAMPLES:
+            cap = min(C.MAX_SEQ, int(lens.max().item()) + 20)
+            with torch.autocast("cuda", enabled=C.USE_AMP and dev.type == "cuda"):
+                preds = model.greedy(imgs, vocab.sos_id,
+                                     vocab.eos_id, max_len=cap)
+            for b in range(imgs.size(0)):
+                ref_tok = vocab.decode(tgts[b].tolist())
+                hyp_tok = vocab.decode(preds[b])
+                all_r.append(ref_tok)
+                all_h.append(hyp_tok)
+            decoded += imgs.size(0)
 
     avg_loss = tot_loss / max(n, 1)
     bleu = calc_bleu(all_r, all_h, C.BLEU_N)
@@ -147,20 +167,22 @@ def validate(model, loader, loss_fn, vocab, dev):
 
 # ----- one epoch of training -----
 
-def train_epoch(model, loader, loss_fn, optim, epoch, dev, gstep):
+def train_epoch(model, loader, loss_fn, optim, scaler, epoch, dev, gstep):
     model.train()
     tot_loss, n = 0.0, 0
     tf = get_tf_ratio(epoch)
     skipped = 0
+    amp_on = C.USE_AMP and dev.type == "cuda"
 
     for step, (imgs, tgts, lens) in enumerate(loader):
         imgs, tgts = imgs.to(dev), tgts.to(dev)
-        optim.zero_grad()
-        logits = model(imgs, tgts, tf_ratio=tf)
-        loss = loss_fn(
-            logits[:, 1:].reshape(-1, logits.size(-1)),
-            tgts[:, 1:].reshape(-1),
-        )
+        optim.zero_grad(set_to_none=True)
+        with torch.autocast("cuda", enabled=amp_on):
+            logits = model(imgs, tgts, tf_ratio=tf)
+            loss = loss_fn(
+                logits[:, 1:].reshape(-1, logits.size(-1)),
+                tgts[:, 1:].reshape(-1),
+            )
 
         # if one batch goes nan and i let adam step on it, the m/v buffers get
         # wrecked and then every step after that is nan too -- thats what killed
@@ -171,12 +193,15 @@ def train_epoch(model, loader, loss_fn, optim, epoch, dev, gstep):
             skipped += 1
             continue
 
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optim)
         gnorm = nn.utils.clip_grad_norm_(model.parameters(), C.CLIP)
         # clipping cant help if the grads are already nan (the norm is nan too),
-        # so i check it here as well before stepping.
+        # so i check it here as well before stepping. under amp an occasional
+        # inf is normal -- update() just shrinks the loss scale.
         if not torch.isfinite(gnorm):
             optim.zero_grad(set_to_none=True)
+            scaler.update()
             gstep += 1
             skipped += 1
             continue
@@ -188,7 +213,8 @@ def train_epoch(model, loader, loss_fn, optim, epoch, dev, gstep):
             for g in optim.param_groups:
                 g["lr"] = C.LR * scale
 
-        optim.step()
+        scaler.step(optim)
+        scaler.update()
         gstep += 1
 
         tot_loss += loss.item()
@@ -258,6 +284,7 @@ def main():
     os.makedirs(C.LOGS_DIR, exist_ok=True)
     log_path = os.path.join(
         C.LOGS_DIR, "train_log_{}.txt".format(C.MODEL_TYPE))
+    restore_log_from_drive(log_path)
     real_stdout = sys.stdout
     sys.stdout = Tee(log_path, real_stdout)
     try:
@@ -286,10 +313,13 @@ def run(log_path):
     val_ds = FormulaDataset(
         C.VAL_IMAGES_DIR,   C.VAL_FORMULAS,   vocab, training=False)
 
+    # keep workers alive between epochs so we don't re-fork them every time
     train_ld = DataLoader(train_ds, C.BATCH, shuffle=True,
-                          num_workers=C.WORKERS, pin_memory=C.PIN_MEM, collate_fn=collate_train)
+                          num_workers=C.WORKERS, pin_memory=C.PIN_MEM,
+                          persistent_workers=C.WORKERS > 0, collate_fn=collate_train)
     val_ld = DataLoader(val_ds,   C.BATCH, shuffle=False,
-                        num_workers=C.WORKERS, pin_memory=C.PIN_MEM, collate_fn=collate_train)
+                        num_workers=C.WORKERS, pin_memory=C.PIN_MEM,
+                        persistent_workers=C.WORKERS > 0, collate_fn=collate_train)
 
     # model  (rnn or transformer, decided by C.MODEL_TYPE)
     model = build_model(len(vocab)).to(dev)
@@ -298,9 +328,12 @@ def run(log_path):
     if C.MODEL_TYPE == "rnn":
         print("Attention:", C.USE_ATTN)
 
-    loss_fn = nn.CrossEntropyLoss(ignore_index=vocab.pad_id)
+    loss_fn = nn.CrossEntropyLoss(
+        ignore_index=vocab.pad_id, label_smoothing=C.LABEL_SMOOTH)
     optim = torch.optim.Adam(model.parameters(), lr=C.LR)
     sched = torch.optim.lr_scheduler.StepLR(optim, C.LR_STEP, C.LR_GAMMA)
+    scaler = torch.amp.GradScaler(
+        "cuda", enabled=C.USE_AMP and dev.type == "cuda")
 
     os.makedirs(C.CHECKPOINT_DIR, exist_ok=True)
 
@@ -308,17 +341,28 @@ def run(log_path):
     best_vloss = float("inf")
     start_ep = 0
 
-    # resume from checkpoint if available.
-    # the file name carries the method so the two models never clobber
-    # each other -- model_best_rnn.pt vs model_best_transformer.pt
-    ckpt_path = os.path.join(
+    # resume from the "last" checkpoint (full state, saved every epoch) so a
+    # stopped run continues from the true latest epoch. "best" is weights-only
+    # for predict.py. names carry the method so rnn/transformer don't clobber.
+    last_path = os.path.join(
+        C.CHECKPOINT_DIR, "model_last_{}.pt".format(C.MODEL_TYPE))
+    best_path = os.path.join(
         C.CHECKPOINT_DIR, "model_best_{}.pt".format(C.MODEL_TYPE))
-    print("Looking for checkpoint:", ckpt_path,
-          "exists:", os.path.exists(ckpt_path))
-    if os.path.exists(ckpt_path):
-        ckpt = torch.load(ckpt_path, map_location=dev)
-        model.load_state_dict(ckpt["model"])
-        optim.load_state_dict(ckpt["optim"])
+    resume_path = last_path if os.path.exists(last_path) else best_path
+    print("Looking for checkpoint:", resume_path,
+          "exists:", os.path.exists(resume_path))
+    if os.path.exists(resume_path):
+        ckpt = torch.load(resume_path, map_location=dev)
+        try:
+            model.load_state_dict(ckpt["model"])
+        except RuntimeError as e:
+            raise SystemExit(
+                "Checkpoint {} does not match the current architecture "
+                "(config changed, e.g. CNN_POOLS). Delete the old "
+                "checkpoints (local AND the copies on Drive) to train from "
+                "scratch.\n\nOriginal error: {}".format(resume_path, e))
+        if "optim" in ckpt:
+            optim.load_state_dict(ckpt["optim"])
         if "sched" in ckpt:
             sched.load_state_dict(ckpt["sched"])
         else:
@@ -327,13 +371,14 @@ def run(log_path):
                 for _ in range(ckpt["epoch"]):
                     sched.step()
         start_ep = ckpt["epoch"]
-        best_vloss = ckpt["vl"]
+        best_vloss = ckpt.get("best_vl", ckpt["vl"])
         if "hist" in ckpt:
             hist = ckpt["hist"]
         if start_ep >= C.EPOCHS:
             print("Already trained {}/{} epochs. Increase EPOCHS in config.py to continue.".format(
                 start_ep, C.EPOCHS))
-        print("Resumed from epoch {}, val_loss={:.4f}".format(start_ep, best_vloss))
+        print("Resumed from epoch {}, best val_loss={:.4f}".format(
+            start_ep, best_vloss))
 
     # global optimizer-step counter drives the lr warmup. seed it from the
     # resume point so a run continued past warmup doesn't warm up again.
@@ -342,7 +387,7 @@ def run(log_path):
     for ep in range(start_ep, C.EPOCHS):
         t0 = time.time()
         tl, gstep = train_epoch(
-            model, train_ld, loss_fn, optim, ep, dev, gstep)
+            model, train_ld, loss_fn, optim, scaler, ep, dev, gstep)
         vl, vb, ve = validate(model, val_ld, loss_fn, vocab, dev)
         sched.step()
         dt = time.time() - t0
@@ -362,25 +407,34 @@ def run(log_path):
         is_best = vl < best_vloss
         if is_best:
             best_vloss = vl
-        if is_best or not C.SAVE_BEST:
-            tag = "best" if is_best else "ep{}".format(ep+1)
-            path = os.path.join(
-                C.CHECKPOINT_DIR, "model_{}_{}.pt".format(tag, C.MODEL_TYPE))
+
+        # full training state, written every epoch
+        torch.save({
+            "epoch": ep + 1,
+            "model": model.state_dict(),
+            "optim": optim.state_dict(),
+            "sched": sched.state_dict(),
+            "hist": hist,
+            "vl": vl, "vb": vb, "ve": ve,
+            "best_vl": best_vloss,
+            "vocab_size": len(vocab),
+        }, last_path)
+        print("  saved:", last_path)
+        save_to_drive(last_path, "checkpoints")
+
+        if is_best:
+            # weights only -- smaller file, quicker drive sync
             torch.save({
                 "epoch": ep + 1,
                 "model": model.state_dict(),
-                "optim": optim.state_dict(),
-                "sched": sched.state_dict(),
-                "hist": hist,
                 "vl": vl, "vb": vb, "ve": ve,
                 "vocab_size": len(vocab),
-            }, path)
-            print("  saved:", path)
+            }, best_path)
+            print("  saved:", best_path)
+            save_to_drive(best_path, "checkpoints")
 
-            # sync checkpoint to drive right away (colab only)
-            save_to_drive(path, "checkpoints")
-            if os.path.exists("/content/drive"):
-                print("  synced to Drive!")
+        if os.path.exists("/content/drive"):
+            print("  synced to Drive!")
 
     plot_curves(hist)
     print("\n--- Done ---")
