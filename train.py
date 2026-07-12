@@ -335,7 +335,8 @@ def run(log_path):
     loss_fn = nn.CrossEntropyLoss(
         ignore_index=vocab.pad_id, label_smoothing=C.LABEL_SMOOTH)
     optim = torch.optim.Adam(model.parameters(), lr=C.LR)
-    sched = torch.optim.lr_scheduler.StepLR(optim, C.LR_STEP, C.LR_GAMMA)
+    # cosine -- lr slides down to ~0 by the last epoch instead of the step drops
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=C.EPOCHS)
     scaler = torch.amp.GradScaler(
         "cuda", enabled=C.USE_AMP and dev.type == "cuda")
 

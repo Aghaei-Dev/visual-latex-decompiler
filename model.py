@@ -318,12 +318,14 @@ class TransformerEncoder(nn.Module):
         self.in_proj = nn.Linear(n_channels * feat_h, d)
         self.pos = PositionalEncoding(d)
         self.drop = nn.Dropout(C.TRANS_DROP)
+        # pre-norm is way more stable at 6 layers -- needs the final norm though
         layer = nn.TransformerEncoderLayer(
             d_model=d, nhead=C.TRANS_HEADS,
             dim_feedforward=C.TRANS_FF, dropout=C.TRANS_DROP,
-            batch_first=True,
+            batch_first=True, norm_first=True,
         )
-        self.enc = nn.TransformerEncoder(layer, C.TRANS_ENC_LAYERS)
+        self.enc = nn.TransformerEncoder(
+            layer, C.TRANS_ENC_LAYERS, norm=nn.LayerNorm(d))
 
     def forward(self, fmap):
         # same column reshape the RowEncoder uses:
@@ -352,12 +354,14 @@ class TransformerDecoder(nn.Module):
         self.drop = nn.Dropout(C.TRANS_DROP)
         self.scale = math.sqrt(d)  # scale the embeddings, as in the paper
 
+        # same pre-norm setup as the encoder
         layer = nn.TransformerDecoderLayer(
             d_model=d, nhead=C.TRANS_HEADS,
             dim_feedforward=C.TRANS_FF, dropout=C.TRANS_DROP,
-            batch_first=True,
+            batch_first=True, norm_first=True,
         )
-        self.dec = nn.TransformerDecoder(layer, C.TRANS_DEC_LAYERS)
+        self.dec = nn.TransformerDecoder(
+            layer, C.TRANS_DEC_LAYERS, norm=nn.LayerNorm(d))
         self.out_proj = nn.Linear(d, n_vocab)
 
     def _causal_mask(self, L, device):

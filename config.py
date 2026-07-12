@@ -74,11 +74,10 @@ TRANS_DEC_LAYERS = 6  # decoder blocks (self-attention + cross-attention)
 TRANS_DROP = 0.1
 
 # --- training ---
-BATCH = 192      # 3*64 so still tensor-core friendly :) always they told us it must be power of 2 
+# 3*64 so still tensor-core friendly :) always they told us it must be power of 2
+BATCH = 192
 EPOCHS = 30
 LR = 3e-4 if MODEL_TYPE == "transformer" else 1e-3   # transformer needs it lower
-LR_STEP = 10     # drop lr every N epochs
-LR_GAMMA = 0.5
 CLIP = 5.0       # gradient clip
 LABEL_SMOOTH = 0.1
 
