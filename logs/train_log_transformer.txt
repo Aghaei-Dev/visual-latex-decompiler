@@ -1,0 +1,262 @@
+Device: cuda
+Loaded vocab (544 tokens) <- /content/visual-latex-decompiler/vocab.pkl
+[FormulaDataset] 75275 samples from /content/visual-latex-decompiler/Data_Im2Latx/images_train
+[FormulaDataset] 8370 samples from /content/visual-latex-decompiler/Data_Im2Latx/images_val
+Model type: transformer
+Parameters: 32,584,096
+Looking for checkpoint: /content/visual-latex-decompiler/checkpoints/model_best_transformer.pt exists: True
+Resumed from epoch 4, val_loss=1.6412
+  ep 5 step 50 loss=1.7069 tf=0.92
+  ep 5 step 100 loss=1.7076 tf=0.92
+  ep 5 step 150 loss=1.7059 tf=0.92
+  ep 5 step 200 loss=1.7108 tf=0.92
+  ep 5 step 250 loss=1.7111 tf=0.92
+  ep 5 step 300 loss=1.7081 tf=0.92
+  ep 5 step 350 loss=1.7062 tf=0.92
+  ep 5 step 400 loss=1.7060 tf=0.92
+  ep 5 step 450 loss=1.7068 tf=0.92
+  ep 5 step 500 loss=1.7082 tf=0.92
+  ep 5 step 550 loss=1.7083 tf=0.92
+  ep 5 step 600 loss=1.7085 tf=0.92
+  ep 5 step 650 loss=1.7080 tf=0.92
+  ep 5 step 700 loss=1.7080 tf=0.92
+  ep 5 step 750 loss=1.7074 tf=0.92
+  ep 5 step 800 loss=1.7070 tf=0.92
+  ep 5 step 850 loss=1.7063 tf=0.92
+  ep 5 step 900 loss=1.7049 tf=0.92
+  ep 5 step 950 loss=1.7050 tf=0.92
+  ep 5 step 1000 loss=1.7051 tf=0.92
+  ep 5 step 1050 loss=1.7048 tf=0.92
+  ep 5 step 1100 loss=1.7043 tf=0.92
+  ep 5 step 1150 loss=1.7046 tf=0.92
+  ep 5 step 1200 loss=1.7044 tf=0.92
+  ep 5 step 1250 loss=1.7051 tf=0.92
+  ep 5 step 1300 loss=1.7053 tf=0.92
+  ep 5 step 1350 loss=1.7057 tf=0.92
+  ep 5 step 1400 loss=1.7058 tf=0.92
+  ep 5 step 1450 loss=1.7056 tf=0.92
+  ep 5 step 1500 loss=1.7055 tf=0.92
+  ep 5 step 1550 loss=1.7057 tf=0.92
+  ep 5 step 1600 loss=1.7064 tf=0.92
+  ep 5 step 1650 loss=1.7062 tf=0.92
+  ep 5 step 1700 loss=1.7059 tf=0.92
+  ep 5 step 1750 loss=1.7062 tf=0.92
+  ep 5 step 1800 loss=1.7059 tf=0.92
+  ep 5 step 1850 loss=1.7052 tf=0.92
+  ep 5 step 1900 loss=1.7048 tf=0.92
+  ep 5 step 1950 loss=1.7048 tf=0.92
+  ep 5 step 2000 loss=1.7054 tf=0.92
+  ep 5 step 2050 loss=1.7058 tf=0.92
+  ep 5 step 2100 loss=1.7054 tf=0.92
+  ep 5 step 2150 loss=1.7052 tf=0.92
+  ep 5 step 2200 loss=1.7048 tf=0.92
+  ep 5 step 2250 loss=1.7050 tf=0.92
+  ep 5 step 2300 loss=1.7049 tf=0.92
+  ep 5 step 2350 loss=1.7047 tf=0.92
+Epoch 5/20 tl=1.7047 vl=1.6254 BLEU=0.0354 ED=0.8525 lr=0.001000 2538s
+  saved: /content/visual-latex-decompiler/checkpoints/model_best_transformer.pt
+  synced to Drive!
+  ep 6 step 50 loss=1.6870 tf=0.89
+  ep 6 step 100 loss=1.6827 tf=0.89
+  ep 6 step 150 loss=1.6814 tf=0.89
+  ep 6 step 200 loss=1.6810 tf=0.89
+  ep 6 step 250 loss=1.6808 tf=0.89
+  ep 6 step 300 loss=1.6810 tf=0.89
+  ep 6 step 350 loss=1.6807 tf=0.89
+  ep 6 step 400 loss=1.6798 tf=0.89
+  ep 6 step 450 loss=1.6809 tf=0.89
+  ep 6 step 500 loss=1.6791 tf=0.89
+  ep 6 step 550 loss=1.6775 tf=0.89
+  ep 6 step 600 loss=1.6765 tf=0.89
+  ep 6 step 650 loss=1.6760 tf=0.89
+  ep 6 step 700 loss=1.6765 tf=0.89
+  ep 6 step 750 loss=1.6766 tf=0.89
+  ep 6 step 800 loss=1.6769 tf=0.89
+  ep 6 step 850 loss=1.6776 tf=0.89
+  ep 6 step 900 loss=1.6779 tf=0.89
+  ep 6 step 950 loss=1.6776 tf=0.89
+  ep 6 step 1000 loss=1.6767 tf=0.89
+  ep 6 step 1050 loss=1.6772 tf=0.89
+  ep 6 step 1100 loss=1.6778 tf=0.89
+  ep 6 step 1150 loss=1.6779 tf=0.89
+  ep 6 step 1200 loss=1.6784 tf=0.89
+  ep 6 step 1250 loss=1.6787 tf=0.89
+  ep 6 step 1300 loss=1.6788 tf=0.89
+  ep 6 step 1350 loss=1.6798 tf=0.89
+  ep 6 step 1400 loss=1.6806 tf=0.89
+  ep 6 step 1450 loss=1.6803 tf=0.89
+  ep 6 step 1500 loss=1.6803 tf=0.89
+  ep 6 step 1550 loss=1.6802 tf=0.89
+  ep 6 step 1600 loss=1.6802 tf=0.89
+  ep 6 step 1650 loss=1.6808 tf=0.89
+  ep 6 step 1700 loss=1.6810 tf=0.89
+  ep 6 step 1750 loss=1.6812 tf=0.89
+  ep 6 step 1800 loss=1.6810 tf=0.89
+  ep 6 step 1850 loss=1.6809 tf=0.89
+  ep 6 step 1900 loss=1.6809 tf=0.89
+  ep 6 step 1950 loss=1.6808 tf=0.89
+  ep 6 step 2000 loss=1.6807 tf=0.89
+  ep 6 step 2050 loss=1.6804 tf=0.89
+  ep 6 step 2100 loss=1.6800 tf=0.89
+  ep 6 step 2150 loss=1.6798 tf=0.89
+  ep 6 step 2200 loss=1.6791 tf=0.89
+  ep 6 step 2250 loss=1.6791 tf=0.89
+  ep 6 step 2300 loss=1.6787 tf=0.89
+  ep 6 step 2350 loss=1.6787 tf=0.89
+Epoch 6/20 tl=1.6788 vl=1.5950 BLEU=0.0471 ED=0.8300 lr=0.001000 2151s
+  saved: /content/visual-latex-decompiler/checkpoints/model_best_transformer.pt
+  synced to Drive!
+  ep 7 step 50 loss=1.6458 tf=0.87
+  ep 7 step 100 loss=1.6464 tf=0.87
+  ep 7 step 150 loss=1.6471 tf=0.87
+  ep 7 step 200 loss=1.6528 tf=0.87
+  ep 7 step 250 loss=1.6534 tf=0.87
+  ep 7 step 300 loss=1.6524 tf=0.87
+  ep 7 step 350 loss=1.6544 tf=0.87
+  ep 7 step 400 loss=1.6548 tf=0.87
+  ep 7 step 450 loss=1.6551 tf=0.87
+  ep 7 step 500 loss=1.6542 tf=0.87
+  ep 7 step 550 loss=1.6540 tf=0.87
+  ep 7 step 600 loss=1.6553 tf=0.87
+  ep 7 step 650 loss=1.6565 tf=0.87
+  ep 7 step 700 loss=1.6561 tf=0.87
+  ep 7 step 750 loss=1.6571 tf=0.87
+  ep 7 step 800 loss=1.6565 tf=0.87
+  ep 7 step 850 loss=1.6561 tf=0.87
+  ep 7 step 900 loss=1.6563 tf=0.87
+  ep 7 step 950 loss=1.6565 tf=0.87
+  ep 7 step 1000 loss=1.6557 tf=0.87
+  ep 7 step 1050 loss=1.6560 tf=0.87
+  ep 7 step 1100 loss=1.6551 tf=0.87
+  ep 7 step 1150 loss=1.6550 tf=0.87
+  ep 7 step 1200 loss=1.6554 tf=0.87
+  ep 7 step 1250 loss=1.6551 tf=0.87
+  ep 7 step 1300 loss=1.6554 tf=0.87
+  ep 7 step 1350 loss=1.6556 tf=0.87
+  ep 7 step 1400 loss=1.6567 tf=0.87
+  ep 7 step 1450 loss=1.6563 tf=0.87
+  ep 7 step 1500 loss=1.6566 tf=0.87
+  ep 7 step 1550 loss=1.6568 tf=0.87
+  ep 7 step 1600 loss=1.6565 tf=0.87
+  ep 7 step 1650 loss=1.6564 tf=0.87
+  ep 7 step 1700 loss=1.6572 tf=0.87
+  ep 7 step 1750 loss=1.6571 tf=0.87
+  ep 7 step 1800 loss=1.6571 tf=0.87
+  ep 7 step 1850 loss=1.6570 tf=0.87
+  ep 7 step 1900 loss=1.6572 tf=0.87
+  ep 7 step 1950 loss=1.6572 tf=0.87
+  ep 7 step 2000 loss=1.6575 tf=0.87
+  ep 7 step 2050 loss=1.6575 tf=0.87
+  ep 7 step 2100 loss=1.6578 tf=0.87
+  ep 7 step 2150 loss=1.6577 tf=0.87
+  ep 7 step 2200 loss=1.6576 tf=0.87
+  ep 7 step 2250 loss=1.6578 tf=0.87
+  ep 7 step 2300 loss=1.6576 tf=0.87
+  ep 7 step 2350 loss=1.6579 tf=0.87
+Epoch 7/20 tl=1.6579 vl=1.5797 BLEU=0.0558 ED=0.8017 lr=0.001000 1323s
+  saved: /content/visual-latex-decompiler/checkpoints/model_best_transformer.pt
+  synced to Drive!
+  ep 8 step 50 loss=1.6177 tf=0.85
+  ep 8 step 100 loss=1.6242 tf=0.85
+  ep 8 step 150 loss=1.6298 tf=0.85
+  ep 8 step 200 loss=1.6333 tf=0.85
+  ep 8 step 250 loss=1.6350 tf=0.85
+  ep 8 step 300 loss=1.6365 tf=0.85
+  ep 8 step 350 loss=1.6358 tf=0.85
+  ep 8 step 400 loss=1.6364 tf=0.85
+  ep 8 step 450 loss=1.6380 tf=0.85
+  ep 8 step 500 loss=1.6388 tf=0.85
+  ep 8 step 550 loss=1.6373 tf=0.85
+  ep 8 step 600 loss=1.6389 tf=0.85
+  ep 8 step 650 loss=1.6389 tf=0.85
+  ep 8 step 700 loss=1.6392 tf=0.85
+  ep 8 step 750 loss=1.6399 tf=0.85
+  ep 8 step 800 loss=1.6400 tf=0.85
+  ep 8 step 850 loss=1.6399 tf=0.85
+  ep 8 step 900 loss=1.6390 tf=0.85
+  ep 8 step 950 loss=1.6389 tf=0.85
+  ep 8 step 1000 loss=1.6393 tf=0.85
+  ep 8 step 1050 loss=1.6396 tf=0.85
+  ep 8 step 1100 loss=1.6398 tf=0.85
+  ep 8 step 1150 loss=1.6399 tf=0.85
+  ep 8 step 1200 loss=1.6400 tf=0.85
+  ep 8 step 1250 loss=1.6397 tf=0.85
+  ep 8 step 1300 loss=1.6402 tf=0.85
+  ep 8 step 1350 loss=1.6404 tf=0.85
+  ep 8 step 1400 loss=1.6409 tf=0.85
+  ep 8 step 1450 loss=1.6412 tf=0.85
+  ep 8 step 1500 loss=1.6410 tf=0.85
+  ep 8 step 1550 loss=1.6411 tf=0.85
+  ep 8 step 1600 loss=1.6410 tf=0.85
+  ep 8 step 1650 loss=1.6404 tf=0.85
+  ep 8 step 1700 loss=1.6407 tf=0.85
+  ep 8 step 1750 loss=1.6410 tf=0.85
+  ep 8 step 1800 loss=1.6411 tf=0.85
+  ep 8 step 1850 loss=1.6414 tf=0.85
+  ep 8 step 1900 loss=1.6413 tf=0.85
+  ep 8 step 1950 loss=1.6419 tf=0.85
+  ep 8 step 2000 loss=1.6419 tf=0.85
+  ep 8 step 2050 loss=1.6415 tf=0.85
+  ep 8 step 2100 loss=1.6412 tf=0.85
+  ep 8 step 2150 loss=1.6409 tf=0.85
+  ep 8 step 2200 loss=1.6408 tf=0.85
+  ep 8 step 2250 loss=1.6411 tf=0.85
+  ep 8 step 2300 loss=1.6408 tf=0.85
+  ep 8 step 2350 loss=1.6409 tf=0.85
+Epoch 8/20 tl=1.6409 vl=1.5687 BLEU=0.0549 ED=0.7964 lr=0.001000 1355s
+Device: cuda
+Loaded vocab (544 tokens) <- /content/visual-latex-decompiler/vocab.pkl
+[FormulaDataset] 75275 samples from /content/visual-latex-decompiler/Data_Im2Latx/images_train
+[FormulaDataset] 8370 samples from /content/visual-latex-decompiler/Data_Im2Latx/images_val
+Model type: transformer
+Parameters: 32,584,096
+Looking for checkpoint: /content/visual-latex-decompiler/checkpoints/model_best_transformer.pt exists: True
+Resumed from epoch 8, val_loss=1.5687
+  ep 9 step 50 loss=1.6312 tf=0.83
+  ep 9 step 100 loss=1.6242 tf=0.83
+  ep 9 step 150 loss=1.6151 tf=0.83
+  ep 9 step 200 loss=1.6162 tf=0.83
+  ep 9 step 250 loss=1.6160 tf=0.83
+  ep 9 step 300 loss=1.6172 tf=0.83
+  ep 9 step 350 loss=1.6177 tf=0.83
+  ep 9 step 400 loss=1.6178 tf=0.83
+  ep 9 step 450 loss=1.6165 tf=0.83
+  ep 9 step 500 loss=1.6163 tf=0.83
+  ep 9 step 550 loss=1.6182 tf=0.83
+  ep 9 step 600 loss=1.6425 tf=0.83
+  ep 9 step 650 loss=1.6557 tf=0.83
+  ep 9 step 700 loss=1.6608 tf=0.83
+  ep 9 step 750 loss=1.6600 tf=0.83
+  ep 9 step 800 loss=1.6610 tf=0.83
+  ep 9 step 850 loss=1.6591 tf=0.83
+  ep 9 step 900 loss=1.6570 tf=0.83
+  ep 9 step 950 loss=1.6558 tf=0.83
+  ep 9 step 1000 loss=1.6536 tf=0.83
+  ep 9 step 1050 loss=1.6522 tf=0.83
+  ep 9 step 1100 loss=1.6509 tf=0.83
+  ep 9 step 1150 loss=1.6500 tf=0.83
+  ep 9 step 1200 loss=1.6496 tf=0.83
+  ep 9 step 1250 loss=1.6494 tf=0.83
+  ep 9 step 1300 loss=1.6481 tf=0.83
+  ep 9 step 1350 loss=1.6479 tf=0.83
+  ep 9 step 1400 loss=1.6472 tf=0.83
+  ep 9 step 1450 loss=1.6466 tf=0.83
+  ep 9 step 1500 loss=1.6460 tf=0.83
+  ep 9 step 1550 loss=1.6451 tf=0.83
+  ep 9 step 1600 loss=1.6444 tf=0.83
+  ep 9 step 1650 loss=1.6434 tf=0.83
+  ep 9 step 1700 loss=1.6432 tf=0.83
+  ep 9 step 1750 loss=1.6427 tf=0.83
+  ep 9 step 1800 loss=1.6424 tf=0.83
+  ep 9 step 1850 loss=1.6417 tf=0.83
+  ep 9 step 1900 loss=1.6412 tf=0.83
+  ep 9 step 1950 loss=1.6411 tf=0.83
+  ep 9 step 2000 loss=1.6407 tf=0.83
+  ep 9 step 2050 loss=1.6400 tf=0.83
+  ep 9 step 2100 loss=1.6403 tf=0.83
+  ep 9 step 2150 loss=1.6403 tf=0.83
+  ep 9 step 2200 loss=1.6413 tf=0.83
+  ep 9 step 2250 loss=1.6415 tf=0.83
+  ep 9 step 2300 loss=1.6417 tf=0.83
+  ep 9 step 2350 loss=1.6417 tf=0.83
+Epoch 9/20 tl=1.6416 vl=1.5707 BLEU=0.0651 ED=0.7675 lr=0.001000 1056s
