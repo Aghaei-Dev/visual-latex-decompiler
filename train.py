@@ -170,7 +170,8 @@ def validate(model, loader, loss_fn, vocab, dev):
 def train_epoch(model, loader, loss_fn, optim, scaler, epoch, dev, gstep):
     model.train()
     tot_loss, n = 0.0, 0
-    tf = get_tf_ratio(epoch)
+    # scheduled sampling is rnn-only, the transformer ignores tf_ratio
+    tf = get_tf_ratio(epoch) if C.MODEL_TYPE == "rnn" else 1.0
     skipped = 0
     amp_on = C.USE_AMP and dev.type == "cuda"
 
@@ -220,8 +221,11 @@ def train_epoch(model, loader, loss_fn, optim, scaler, epoch, dev, gstep):
         tot_loss += loss.item()
         n += 1
         if (step + 1) % C.LOG_INTERVAL == 0:
-            print("  ep {} step {} loss={:.4f} tf={:.2f}".format(
-                epoch+1, step+1, tot_loss/n, tf))
+            msg = "  ep {} step {} loss={:.4f}".format(
+                epoch+1, step+1, tot_loss/n)
+            if C.MODEL_TYPE == "rnn":
+                msg += " tf={:.2f}".format(tf)
+            print(msg)
 
     if skipped:
         print("  ep {} skipped {} nan step(s)".format(epoch+1, skipped))

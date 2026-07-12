@@ -68,12 +68,13 @@ ATTN_DIM = 256
 TRANS_D_MODEL = 512
 TRANS_HEADS = 8       # 512 / 8 = 64 dims per head
 TRANS_FF = 2048       # feed-forward width inside each block
-TRANS_ENC_LAYERS = 4  # column self-attention blocks (replaces the biLSTM)
-TRANS_DEC_LAYERS = 4  # decoder blocks (self-attention + cross-attention)
+# 6 layers -- the 4+4 run plateaued at BLEU ~0.90 with zero overfit gap
+TRANS_ENC_LAYERS = 6  # column self-attention blocks (replaces the biLSTM)
+TRANS_DEC_LAYERS = 6  # decoder blocks (self-attention + cross-attention)
 TRANS_DROP = 0.1
 
 # --- training ---
-BATCH = 128      # fills more of the gpu than 32 and trains faster
+BATCH = 192      # 3*64 so still tensor-core friendly :) always they told us it must be power of 2 
 EPOCHS = 30
 LR = 3e-4 if MODEL_TYPE == "transformer" else 1e-3   # transformer needs it lower
 LR_STEP = 10     # drop lr every N epochs
@@ -86,7 +87,8 @@ USE_AMP = True   # mixed precision -- ~2x faster per step on the gpu
 # ramp the lr up over the first steps -- full lr from step 0 blows up to nan
 WARMUP_STEPS = 500
 
-# teacher forcing -- starts high, decays linearly to TF_END
+# teacher forcing -- starts high, decays linearly to TF_END (rnn only,
+# the transformer is always fully teacher forced)
 TF_START = 1.0
 TF_END = 0.6
 
