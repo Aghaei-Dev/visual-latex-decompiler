@@ -61,11 +61,13 @@ def main():
         print("\r  {}/{} images ({:.0f}%)".format(done,
               total, 100*done/total), end="", flush=True)
         imgs = imgs.to(dev)
-        if opt.beam:
-            seqs = model.beam_decode(
-                imgs, vocab.sos_id, vocab.eos_id, beam_k=opt.beam_width)
-        else:
-            seqs = model.greedy(imgs, vocab.sos_id, vocab.eos_id)
+        with torch.autocast("cuda", dtype=torch.float16,
+                            enabled=C.USE_AMP and dev.type == "cuda"):
+            if opt.beam:
+                seqs = model.beam_decode(
+                    imgs, vocab.sos_id, vocab.eos_id, beam_k=opt.beam_width)
+            else:
+                seqs = model.greedy(imgs, vocab.sos_id, vocab.eos_id)
 
         for i, seq in enumerate(seqs):
             toks = vocab.decode(seq)

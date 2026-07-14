@@ -446,49 +446,59 @@ class Im2LatexTransformer(nn.Module):
 
     @torch.no_grad()
     def beam_decode(self, imgs, sos, eos, beam_k=None, max_len=None):
-        """beam search, one image at a time -- same idea as the rnn version,
-        we just re-run the whole decoder on each candidate instead of
-        carrying an lstm hidden state."""
+        """batched beam search, every (image, beam) pair is one row of one
+        big batch, so each step is a single decoder forward instead of
+        B*beam_k tiny batch-1 calls. same math, just vectorized."""
         beam_k = beam_k or C.BEAM_K
         max_len = max_len or C.MAX_SEQ
 
-        mem_all = self._memory(imgs)
         B = imgs.size(0)
         dev = imgs.device
+
+        mem = self._memory(imgs)
+        S, d = mem.size(1), mem.size(2)
+        mem = mem.unsqueeze(1).expand(B, beam_k, S, d).reshape(B*beam_k, S, d)
+
+        ys = torch.full((B*beam_k, 1), sos, dtype=torch.long, device=dev)
+        # only beam 0 starts alive, else step 1 picks k copies of the same token
+        scores = torch.full((B, beam_k), float("-inf"), device=dev)
+        scores[:, 0] = 0.0
+        finished = torch.zeros(B*beam_k, dtype=torch.bool, device=dev)
+
+        for _ in range(max_len):
+            logits = self.decoder.decode(mem, ys)
+            lp = F.log_softmax(logits[:, -1].float(), 1)
+            V = lp.size(1)
+
+            # finished beams may only repeat EOS for free -- score stays frozen
+            if finished.any():
+                lp[finished] = float("-inf")
+                lp[finished, eos] = 0.0
+
+            cand = (scores.view(B*beam_k, 1) + lp).view(B, beam_k*V)
+            scores, idx = cand.topk(beam_k, dim=1)
+            parent, tok = idx // V, idx % V
+
+            flat = (torch.arange(B, device=dev).unsqueeze(1)*beam_k
+                    + parent).view(-1)
+            ys = torch.cat([ys[flat], tok.view(-1, 1)], 1)
+            finished = finished[flat] | (tok.view(-1) == eos)
+            if finished.all():
+                break
+
+        # same length-norm pick as the rnn version
+        ys = ys.view(B, beam_k, -1)
         results = []
-
         for b in range(B):
-            mem = mem_all[b:b+1]
-            # (token_list starting with SOS, cumul_log_prob, finished)
-            beams = [([sos], 0.0, False)]
-
-            for _ in range(max_len):
-                new_beams = []
-                for seq, score, fin in beams:
-                    if fin:
-                        new_beams.append((seq, score, True))
-                        continue
-                    ys = torch.tensor([seq], device=dev)
-                    logits = self.decoder.decode(mem, ys)
-                    lp = F.log_softmax(logits[:, -1], 1).squeeze(0)
-                    vals, ids = lp.topk(beam_k)
-                    for k in range(beam_k):
-                        tid = ids[k].item()
-                        ns = score + vals[k].item()
-                        if tid == eos:
-                            new_beams.append((seq, ns, True))
-                        else:
-                            new_beams.append((seq + [tid], ns, False))
-                new_beams.sort(key=lambda x: x[1], reverse=True)
-                beams = new_beams[:beam_k]
-                if all(f for _, _, f in beams):
-                    break
-
-            # same length-norm as the rnn version (len-1: seq carries SOS)
-            best = max(
-                beams,
-                key=lambda x: x[1] / max(1, len(x[0]) - 1) ** C.BEAM_LEN_NORM)
-            results.append(best[0][1:])  # drop the leading SOS
+            best_score, best_seq = None, []
+            for k in range(beam_k):
+                seq = ys[b, k, 1:].tolist()
+                if eos in seq:
+                    seq = seq[:seq.index(eos)]
+                s = scores[b, k].item() / max(1, len(seq)) ** C.BEAM_LEN_NORM
+                if best_score is None or s > best_score:
+                    best_score, best_seq = s, seq
+            results.append(best_seq)
         return results
 
 
