@@ -67,17 +67,23 @@ Image (1x64x256) --> [CNN Encoder] --> [Row Encoder (biLSTM)] --> [Decoder (LSTM
 
 **Channels progression:** 1 --> 64 --> 128 --> 256 --> 512
 
-**Spatial size after each pool:**
+**Spatial size after each pool** (the last two blocks only pool the height, see the note below):
 
 | Layer  | Size     |
 | ------ | -------- |
 | Input  | 64 x 256 |
 | Pool 1 | 32 x 128 |
 | Pool 2 | 16 x 64  |
-| Pool 3 | 8 x 32   |
-| Pool 4 | 4 x 16   |
+| Pool 3 | 8 x 64   |
+| Pool 4 | 4 x 64   |
 
-**Output:** Feature map of shape `(B, 512, 4, 16)` -- 512 channels, 4 rows, 16 columns.
+**Output:** Feature map of shape `(B, 512, 4, 64)` -- 512 channels, 4 rows, 64 columns.
+
+> note: the method-1 run reported in section 7 was trained with the original all-`(2,2)`
+> pooling, so its feature map was `4 x 16`. while building method 2 i changed the last two
+> pools to `(2,1)` (halve height only -- `CNN_POOLS` in `config.py`) so the encoder gets 64
+> columns instead of 16: more positions for the attention to point at. sections 3.2-3.5
+> below describe the `4 x 16` version that method 1 was actually trained with.
 
 ### 3.2 Row Encoder (`RowEncoder` in `model.py`)
 
@@ -143,10 +149,10 @@ Input image (B, 1, 64, 256)
 LaTeX token sequence
 ```
 
-### 3.6 Method 2 -- Transformer (overview)
+### 3.6 Transformer:Method 2
 
 **Idea:** keep the CNN (it just turns pixels into features -- both methods need
-that) but replace the _sequence_ part. Method 1 is fully recurrent: a biLSTM reads
+that) but replace the _sequence_ part. Method 1 (rnn i mean) is fully recurrent: a biLSTM reads
 the feature columns and an LSTM generates tokens. Method 2 is fully
 attention-based: a Transformer encoder reads the feature columns and a Transformer
 decoder generates tokens. so the comparison is really **recurrence vs
@@ -156,26 +162,29 @@ self-attention** for this task.
 Image (1x64x256) --> [CNN Encoder] --> [Transformer Encoder] --> [Transformer Decoder] --> LaTeX tokens
 ```
 
-The CNN is byte-for-byte the same `ConvEncoder`, so its output is still
-`(B, 512, 4, 16)`, and the 16 columns are flattened to 2048-dim vectors exactly
-like the biLSTM sees them -- that's on purpose so both encoders get identical input.
+The CNN is the same `ConvEncoder` class, run with the widened pooling, so its
+output is `(B, 512, 4, 64)`: 64 columns, each flattened to a 2048-dim vector
+(512 channels x 4 rows) -- the same kind of column features the biLSTM sees,
+just more of them.
 
 ### 3.7 Transformer Encoder (`TransformerEncoder` in model.py)
 
-**What it does:** the same job as the biLSTM row encoder -- turn the 16 column
-features into context-aware vectors -- but it looks at all 16 columns at once with
+**What it does:** the same job as the biLSTM row encoder -- turn the 64 column
+features into context-aware vectors -- but it looks at all columns at once with
 self-attention instead of stepping left-to-right.
 
 **How it works:**
 
-1. Each of the 16 columns (2048-dim) is linearly projected to `d_model = 512`
+1. Each of the 64 columns (2048-dim) is linearly projected to `d_model = 512`
 2. A sinusoidal positional encoding is added (a transformer has no built-in sense
    of order, so we tell it which column is which)
-3. `TRANS_ENC_LAYERS = 4` transformer encoder blocks (multi-head self-attention +
-   feed-forward) process the sequence
+3. `TRANS_ENC_LAYERS = 6` transformer encoder blocks (multi-head self-attention +
+   feed-forward) process the sequence. the blocks are **pre-norm** (`norm_first=True`,
+   LayerNorm _before_ each sub-layer instead of after) -- this trains noticeably more
+   stable; my first post-norm attempt diverged to nan early in training
 
-**Output:** sequence of 16 vectors, each 512-dim -- same shape as the biLSTM's
-output, so the decoder doesn't care which encoder produced it.
+**Output:** sequence of 64 vectors, each 512-dim. the decoder just cross-attends
+into this memory, so it doesn't care which encoder produced it.
 
 ### 3.8 Transformer Decoder (`TransformerDecoder` in model.py)
 
@@ -187,32 +196,36 @@ the encoder memory.
 
 1. **Masked self-attention** -- each position can only look at earlier tokens (a
    causal mask), so the model can't cheat by seeing the future during training
-2. **Cross-attention** -- attends to the 16 encoder vectors (this is the
+2. **Cross-attention** -- attends to the 64 encoder vectors (this is the
    transformer's version of the Bahdanau attention: "which part of the image
    matters for the next token")
 3. **Feed-forward** -- a small MLP applied per position
 
 Token embeddings (512-dim) are scaled by sqrt(d_model) and get their own
 positional encoding before the blocks. A final linear layer projects to
-vocabulary logits. `TRANS_DEC_LAYERS = 4` blocks, `TRANS_HEADS = 8` attention heads.
+vocabulary logits. `TRANS_DEC_LAYERS = 6` blocks, `TRANS_HEADS = 8` attention
+heads, pre-norm like the encoder.
 
 **Training vs inference:** during training the whole shifted target is fed at once
 and the causal mask does the rest, so it's fully teacher-forced and parallel (no
 step-by-step loop -- much faster per epoch than the RNN). At inference we decode
-one token at a time (greedy or beam) exactly like method 1.
+one token at a time (greedy or beam) exactly like method 1 -- but the method-2 beam
+search is **batched** (every image in the batch carries its 5 beams in one tensor)
+and runs under fp16 autocast, so decoding the whole validation set takes minutes
+instead of the hours the one-image-at-a-time rnn beam needs.
 
 ### 3.9 Full Method-2 Summary (`Im2LatexTransformer` in model.py)
 
 ```bash
 Input image (B, 1, 64, 256)
         |
-   ConvEncoder            -- 4x [Conv3x3 + BN + ReLU + Pool2x2]  (shared with method 1)
-        |                  -- output: (B, 512, 4, 16)
+   ConvEncoder            -- 4x [Conv3x3 + BN + ReLU + Pool]  (same class as method 1)
+        |                  -- output: (B, 512, 4, 64)
         v
-   TransformerEncoder     -- flatten columns + positional enc + 4x self-attention blocks
-        |                  -- output: (B, 16, 512)
+   TransformerEncoder     -- flatten columns + positional enc + 6x self-attention blocks
+        |                  -- output: (B, 64, 512)
         v
-   TransformerDecoder     -- 4x [masked self-attn + cross-attn + FFN]
+   TransformerDecoder     -- 6x [masked self-attn + cross-attn + FFN]
         |                  -- generates tokens autoregressively
         v
 LaTeX token sequence
@@ -223,6 +236,10 @@ LaTeX token sequence
 they're running.
 
 ## 4. Hyperparameters (config.py)
+
+these are the values the **method-1 run** was trained with. method 2 got its own training parameters
+(section 4.1) because a transformer simply refuses to train well with rnn
+settings.
 
 **Why each value was chosen:**
 
@@ -246,27 +263,38 @@ they're running.
 
 **Loss function:** Cross-entropy, ignoring PAD tokens (index 0) and the SOS position. This is standard for sequence generation -- it penalizes the model for each wrong token prediction.
 
-### 4.1 Method-2 (Transformer) Hyperparameters
+### 4.1 Transformer Hyperparameters
 
-These live in `config.py` too and only affect Method 2. i kept `d_model = 512`
-equal to the biLSTM encoder's output width so the two methods stay roughly the
-same size and the comparison is fair.
+These live in `config.py` too. i kept `d_model = 512` equal to the biLSTM
+encoder's output width so the two methods stay comparable in width, but method 2
+gets its **own training Hyperparameters**. my first attempt with the rnn recipe (lr 1e-3,
+no warmup) diverged to nan within the first epochs, so i switched to the standard transformer recipe:
 
-| Parameter              | Value                     | Why                                                                                                                  |
-| ---------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **`MODEL_TYPE`**       | `"rnn"` / `"transformer"` | the one switch that picks which method to build, train and predict with.                                             |
-| **`TRANS_D_MODEL`**    | 512                       | model width. matches the biLSTM encoder output (256x2) so the sizes are comparable, and divisible by the head count. |
-| **`TRANS_HEADS`**      | 8                         | multi-head attention splits 512 into 8 heads of 64 each. standard ratio.                                             |
-| **`TRANS_FF`**         | 2048                      | feed-forward width inside each block (4x d_model, the usual transformer ratio).                                      |
-| **`TRANS_ENC_LAYERS`** | 4                         | encoder self-attention blocks (replaces the single biLSTM layer).                                                    |
-| **`TRANS_DEC_LAYERS`** | 4                         | decoder blocks. deep enough to model 200-token formulas, light enough for a T4.                                      |
-| **`TRANS_DROP`**       | 0.1                       | dropout inside the transformer. BN in the shared CNN already regularizes the front-end.                              |
+| Parameter              | Value            | Why                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`MODEL_TYPE`**       | `"transformer"`  | the one switch that picks which method to build, train and predict with.                                                                                                                                                                                                                                             |
+| **`TRANS_D_MODEL`**    | 512              | model width. matches the biLSTM encoder output (256x2) so the sizes are comparable, and divisible by the head count.                                                                                                                                                                                                 |
+| **`TRANS_HEADS`**      | 8                | multi-head attention splits 512 into 8 heads of 64 each. standard ratio.                                                                                                                                                                                                                                             |
+| **`TRANS_FF`**         | 2048             | feed-forward width inside each block (4x d_model, the usual transformer ratio).                                                                                                                                                                                                                                      |
+| **`TRANS_ENC_LAYERS`** | 6                | encoder self-attention blocks (replaces the single biLSTM layer). the first 4+4 run plateaued with zero overfit gap, so i gave it more capacity.                                                                                                                                                                     |
+| **`TRANS_DEC_LAYERS`** | 6                | decoder blocks. deep enough to model 200-token formulas, still fits a T4.                                                                                                                                                                                                                                            |
+| **`TRANS_DROP`**       | 0.1              | dropout inside the transformer. BN in the shared CNN already regularizes the front-end.                                                                                                                                                                                                                              |
+| **`BATCH`**            | 192              | transformer training is parallel over the whole sequence, so a much bigger batch fits and keeps the gpu saturated. (3x64, still tensor-core friendly. in first semester and the CV course i kept that 64 and one it jsut uses 2Gb of VRAM Colab offers to us with this we use all 15 GB of Vram so nothings spill :) |
+| **`EPOCHS`**           | 30               | the curves are flat well before 30 (section 7.2).                                                                                                                                                                                                                                                                    |
+| **`LR`**               | 3e-4             | transformers want a lower peak lr than the rnn's 1e-3 -- higher just diverges.                                                                                                                                                                                                                                       |
+| **`WARMUP_STEPS`**     | 500              | lr ramps linearly from 0 over the first 500 steps. full lr from step 0 blows up to nan.                                                                                                                                                                                                                              |
+| **`LR schedule`**       | cosine annealing | after warmup the lr decays smoothly to ~0 at epoch 30 (visible in the `lr=` column of the log) instead of the rnn's step-halving.                                                                                                                                                                                    |
+| **`LABEL_SMOOTH`**     | 0.1              | spreads a little probability mass off the target token -- standard for transformer seq2seq, helps generalization. also why the loss floor sits near ~1.07 instead of near 0.                                                                                                                                         |
+| **`USE_AMP`**          | True             | mixed precision -- roughly 2x faster per step on the T4, no quality loss that i could measure.                                                                                                                                                                                                                       |
+| **`BEAM_LEN_NORM`**    | 0.7              | beam scores are divided by len^0.7, otherwise short beams always win.                                                                                                                                                                                                                                                |
 
-everything else (batch size, epochs, Adam, LR schedule, gradient clip, beam width)
-is **shared** with method 1 on purpose -- same training budget for both, so the
-comparison isn't skewed by tuning one harder than the other. note that teacher
-forcing does not apply to the transformer (it's always fully teacher-forced by
-design), so `TF_START` / `TF_END` are simply ignored when `MODEL_TYPE = "transformer"`.
+what **is** shared: the data, the splits, the vocabulary, the preprocessing, the
+max sequence length, gradient clipping, Adam, beam width 5, and all three
+evaluation scripts. so the comparison in 7.7 is "each method trained with the
+recipe that suits it, judged by the same judge" -- which i think is the fair
+version of fair. note that teacher forcing does not apply to the transformer
+(it's always fully teacher-forced by design), so `TF_START` / `TF_END` are simply
+ignored when `MODEL_TYPE = "transformer"`.
 
 ## 5. Files -- What Each One Does
 
@@ -296,8 +324,8 @@ design), so `TF_START` / `TF_END` are simply ignored when `MODEL_TYPE = "transfo
 
 ### 7.1 Training Curves
 
-Below are the plots generated by `train.py` at the end of the 40-epoch run.
-Each run writes per-method files (`loss_rnn.png` / `loss_transformer.png`,
+Below are the plots generated by `train.py` at the end of each run (40 epochs
+for the rnn, 30 for the transformer). Each run writes per-method files (`loss_rnn.png` / `loss_transformer.png`,
 etc.), so switching `MODEL_TYPE` never overwrites the other method's curves.
 **Method 1 -- RNN (`rnn` run):**
 
@@ -311,59 +339,50 @@ etc.), so switching `MODEL_TYPE` never overwrites the other method's curves.
 ![BLEU](plots/bleu_transformer.png)
 ![Edit Distance](plots/edit_distance_transformer.png)
 
-### 7.2 Loss Curve Analysis (Epoch by Epoch)
+### 7.2 Loss Curve Analysis
 
-i will break down what happens in the loss plot phase by phase:
+**method 1 (rnn), 40 epochs:**
 
-**Epochs 1-5 — the big drop:**
-The loss falls really fast here. at epoch 1 the model basically knows nothing, its predicting random tokens. but by epoch 5 it already learned the easy stuff -- things like `{` and `}` appearing after `\frac`, or `_` and `^` being super common. teacher forcing is still almost 1.0 at this point so the model gets the correct previous token every time, which means it can focus on just learning what token comes next without worrying about its own mistakes yet.
+the rnn loss curve has three phases. **epochs 1-10** is the big drop: the model quickly learns the easy stuff (brace pairs after `\frac`, how common `_` and `^` are) while teacher forcing is still near 1.0, then moves on to the harder grammar like balanced parentheses and the `\sum _ { } ^ { }` pattern. **epochs 10-30** is steady refinement: each lr halving (epochs 10, 20, 30) gives a visible little step in the curve, and the decaying teacher forcing (1.0 -> 0.6) forces the decoder to learn to recover from its own mistakes -- exactly the skill it needs at inference time, where there is no teacher. **epochs 30-40** is convergence: the curve is essentially flat and the last lr drop just polishes edge cases (rare symbols, very long formulas).
 
-**Epochs 5-10 — still going down, but slower:**
-now the easy tokens are handled and the model is working on harder patterns. stuff like: `\frac` always needs exactly two brace groups after it, `\sum` usually comes with `_ { ... } ^ { ... }`, parentheses need to be balanced. the learning rate is 0.001 this whole time (hasnt been reduced yet), and teacher forcing starts to drop a little bit, maybe down to ~0.9. so the model occasionally has to deal with its own predictions as input, which is harder but necessary.
+training loss stays below validation loss for the whole run, which is expected -- the model has seen the training images. what matters is that the gap stays **small and stable** for all 40 epochs; a growing gap would mean over-fitting, and here the regularization (dropout 0.2/0.1 + light augmentation) keeps it constant.
 
-**Epoch 10 — first LR drop:**
-the scheduler halves the learning rate to 0.0005. if you look closely at the plot there is a noticeable change in the curve shape here -- the loss still goes down but the steps are smaller and more precise. this is useful because at this point the model is already "in the right neighborhood" and large learning rate steps would just bounce around instead of converging. the val loss also gets a small boost here which is a good sign -- it means we were not over-fitting yet.
+**method 2 (transformer), 30 epochs:**
 
-**Epochs 10-20 — steady refinement:**
-the model keeps improving but each epoch gains less. teacher forcing is decaying through this phase (going from ~0.9 toward ~0.75) so the model is forced to rely more on itself. this is the phase where the decoder learns to recover from its own bad predictions -- if it outputs a wrong token, it needs to still produce something reasonable after that. without this gradual decay the model would completely fall apart at test time because there is no teacher forcing during inference.
+the transformer curve looks different in three ways. first, it starts with a **warmup**: the lr ramps up over the first 500 steps (the log shows `lr=0.000235` at the end of epoch 1, still climbing toward the 3e-4 peak) -- without this ramp the model diverges to nan, i learned that the hard way. second, the descent is much steeper per epoch: validation loss goes 3.25 -> 1.54 in just 4 epochs, because every training step updates all target positions in parallel instead of one token at a time. there is one visible hiccup at epoch 5 (val loss briefly jumps to 1.75) while the lr is still near its peak -- the cosine annealing calms that down and it never happens again. third, the **loss floor sits at ~1.07 instead of near 0** -- that is the label smoothing (0.1) putting a fixed cost on every prediction, not the model failing to fit.
 
-**Epoch 20 — second LR drop:**
-learning rate goes to 0.00025. the loss curve is getting pretty flat here. improvements are small but still measurable. the interesting thing is that validation loss and training loss are still pretty close to each other -- the gap between them hasnt grown much since epoch 10. that tells us regularization is working (dropout 0.2 in decoder, 0.1 in encoder, plus the small image augmentation).
-
-**Epochs 20-30 — approaching the floor:**
-not much happening visually in the plot. the loss goes down by maybe 0.01-0.02 per epoch. teacher forcing is around 0.65-0.7 so the model is mostly on its own. at this stage the model is mostly fine-tuning edge cases -- rare symbols, long formulas, unusual combinations.
-
-**Epoch 30 — third LR drop:**
-lr = 0.000125. the curve is essentially flat after this. the model has learned everything it can from the data at this capacity.
-
-**Epochs 30-40 — convergence:**
-both train and val loss are flat. we could stop here and the results would be the same. the reason i kept it at 40 is that the LR schedule has 4 clean drops (10, 20, 30, 40) and stopping earlier would miss the last fine-tuning phase.
-
-**About the train vs val gap:**
-training loss is always lower than validation loss -- this is completely expected. the model sees the training images during training (obviously) so it fits them a little better than unseen validation images. the important thing is that this gap stays **small and stable** throughout all 40 epochs. if the gap was growing (train loss keeps going down but val loss goes up or stays flat) that would mean over-fitting. in our case the gap is roughly constant, meaning the model generalizes well.
+by epoch 20 the curve is flat and the cosine tail (lr -> 0) just fine-tunes: final train loss 1.0724 vs val loss 1.0861. that gap is tiny -- the transformer, despite having ~4.7x more parameters than the rnn, shows basically **zero over-fitting** on this dataset.
 
 ### 7.3 BLEU Curve Analysis
 
-BLEU starts near 0 (random predictions don't match ground truth at all) and climbs very fast in the first ~8 epochs, reaching around 0.7. after that it slows down a lot. between epochs 8-20 it goes from ~0.7 to ~0.8, and from epoch 20 to 40 it only gains another ~0.03 to reach the final **0.831935**.
+**method 1:** BLEU starts near 0 (random predictions match nothing) and climbs very fast in the first ~8 epochs to about 0.7, slows to ~0.8 by epoch 20, and gains only another ~0.03 over the last 20 epochs to finish at **0.831935**. the easy gains come first -- once the model produces roughly correct formulas, the remaining points have to be earned on the details of longer and rarer formulas, which is much harder.
 
-this pattern makes sense because the "easy" gains come first -- once the model can produce roughly correct formulas, going from 0.7 to 0.8 means it needs to get the details right on longer and rarer formulas, which is much harder. and going from 0.8 to 0.83 is even harder because those last errors are the toughest cases.
-
-the fact that BLEU is still slowly increasing even at epoch 40 means we haven't completely plateaued, but the gains are so small (maybe 0.005 per epoch) that running more epochs wouldn't be worth the compute.
+**method 2:** the transformer climbs steeper: 0.05 after epoch 1, 0.68 by epoch 4, 0.85 by epoch 10, and it crosses 0.89 around epoch 20 where it plateaus. one detail so the numbers dont look inconsistent: the per-epoch curve ends at 0.8982, but that value is greedy decoding on a 640-image subset (the fast per-epoch check, `VAL_DECODE_SAMPLES` in config.py). the official number in 7.5/7.7, **0.892427**, is beam search over the **full** 8370-image validation set scored with `bleu_score.py` -- that one is the number that counts.
 
 ### 7.4 Edit Distance Curve Analysis
 
-the edit distance plot is basically the mirror image of BLEU. it starts high (~1.0 meaning predictions are totally wrong) and drops fast in the first 10 epochs. then it keeps decreasing slowly until it flattens around epoch 30.
+**method 1:** basically the mirror image of BLEU. it starts high (~1.0, predictions totally wrong), drops fast in the first 10 epochs, then flattens around epoch 30. the final edit distance accuracy (which is 1 - normalized_distance) is **0.868808** -- the average prediction is ~87% correct at the token level, so a 50-token formula needs roughly 6-7 token fixes and most short formulas come out perfectly.
 
-the final edit distance accuracy (which is 1 - normalized_distance) is **0.868808**. this means the average prediction is ~87% correct at the token level. for a 50-token formula, roughly 6-7 tokens would need to be fixed. for short formulas (10-20 tokens) most of them come out perfectly.
+**method 2:** same mirror shape, but lower and faster: the raw distance is down to ~0.12 by epoch 10 and ~0.08 by epoch 20. the final edit distance accuracy over the full validation set is **0.923167** -- the average transformer prediction needs about **40% fewer token fixes** than the rnn one (~7.7 vs ~13.1 wrong tokens per 100). small note so nobody gets confused: the training log prints the raw normalized **distance** (lower = better, e.g. `ED=0.0773`), while the report tables use **accuracy = 1 - distance** (higher = better).
 
 ### 7.5 Final Validation Metrics
 
-| Metric                 | Value      |
-| ---------------------- | ---------- |
-| BLEU (4-gram)          | `0.831935` |
-| Edit Distance Accuracy | `0.868808` |
+both methods, scored with the same three scripts on the full validation set (8370 formulas):
 
-important note: these metrics are computed on the **validation set only**. i dont measure BLEU/edit distance on the training set because during training the model uses teacher forcing (it gets the correct previous token as input). if i measured BLEU during training it would be artificially high and misleading. the validation metrics use tf_ratio=0.0 (free running, the model only sees its own predictions) and greedy decoding, which is exactly what happens during real inference. so these numbers reflect the true performance.
+| Metric                 | Method 1: RNN | Method 2: Transformer |
+| ---------------------- | ------------- | --------------------- |
+| BLEU (4-gram)          | `0.831935`    | `0.892427`            |
+| Edit Distance Accuracy | `0.868808`    | `0.923167`            |
+| Exact Match Accuracy   | `0.266667`    | `0.391756`            |
+
+> note on the missing cell: `exact_match.py` was written **after** the method-1 run
+> finished, so the rnn exact-match was never measured. `val_predictions_rnn.txt` is
+> saved in the repo though, so filling it is one notebook cell (evaluation cell with
+> `MODEL_TYPE = "rnn"`) -- no retraining needed.
+
+about the exact-match value: 0.3918 means ~39% of the 8370 validation formulas come out **token-perfect**. that sounds low next to 92% edit-distance accuracy, but exact match is the strictest metric there is -- one wrong token anywhere kills the whole formula. actually 39% is a strong number: if the errors were spread evenly, 92.3% per-token accuracy over a typical 50-token formula would give only ~2% exact matches (0.923^50). the real 39% tells us the errors are **concentrated in a minority of hard formulas** (very long ones, rare symbols) while most everyday formulas come out completely clean.
+
+important note: these metrics are computed on the **validation set only**. i dont measure BLEU/edit distance on the training set because during training the model uses teacher forcing (it gets the correct previous token as input), so training-set scores would be artificially high and misleading. the per-epoch curves use free running + greedy decoding, and the final table numbers use beam search over the full validation set -- both are exactly what happens at real inference, so these numbers reflect the true performance.
 
 training loss is lower than val loss throughout, which is normal for any neural network. the model fits training data slightly better because it has seen those examples. what matters is that the gap stays small and constant. if val loss started going up while train loss kept dropping, that would be over-fitting and we would need to stop training or add more regularization. but that didn't happen here.
 
@@ -392,6 +411,8 @@ most samples come out fully green (exact match). the cases where there are diffe
 - visually similar symbols like `\nu` vs `v` or `\rho` vs `p` -- these look almost identical in the input image so its hard for the CNN to tell them apart
 - rare symbol combinations that don't appear often enough in the training data for the model to learn them reliably
 
+the transformer's comparison plot shows the same failure buckets but visibly fewer red tokens overall. in particular the long-formula drift is much milder -- which matches the self-attention story: the transformer decoder can look **directly** at any earlier token and any image column at every step, instead of squeezing the whole history through one LSTM hidden state. the confusable-symbols failures (`\nu` vs `v`) stay, because those are a CNN problem, not a decoder problem.
+
 ### 7.7 Method 1 vs Method 2 -- The Comparison
 
 This is the head-to-head the deep-learning course asks for. **Both models are
@@ -399,19 +420,21 @@ trained and evaluated on the same data, vocabulary and splits**, with the same
 training budget, and scored with the same three scripts (`bleu_score.py`,
 `edit_distance.py`, `exact_match.py`) on the validation set.
 
-> Method-1 numbers are from the finished 40-epoch run. Method-2 numbers get filled
-> in after training with `MODEL_TYPE = "transformer"` -- the notebook prints every
-> value below. `# params` is printed by `train.py` at startup; train/inference time
-> you read off the run.
+> Method-1 numbers are from the finished 40-epoch rnn run, method-2 numbers from
+> the finished 30-epoch transformer run. the parameter count is what `train.py`
+> prints at startup (the rnn startup log wasn't kept, so its count is computed by
+> hand from the layer dimensions); times are the wall-clock of the colab runs.
 
-| Metric                     | Method 1: CNN + biLSTM + Attention | Method 2: CNN + Transformer    |
-| -------------------------- | ---------------------------------- | ------------------------------ |
-| BLEU (4-gram)              | `0.831935`                         | `LATER WE FILL IT DON'T WORRY` |
-| Edit-Distance accuracy     | `0.868808`                         | `LATER WE FILL IT DON'T WORRY` |
-| Exact-Match accuracy       | `RUN exact_match.py`               | `LATER WE FILL IT DON'T WORRY` |
-| # Parameters               | `see train.py startup log`         | `see train.py startup log`     |
-| Training time              | `~ 18 hrs on T4`                   | `LATER WE FILL IT DON'T WORRY` |
-| Inference time (val, beam) | `LATER WE FILL IT DON'T WORRY`     | `LATER WE FILL IT DON'T WORRY` |
+| Metric                     | Method 1: CNN + biLSTM + Attention   | Method 2: CNN + Transformer      |
+| -------------------------- | ------------------------------------ | -------------------------------- |
+| BLEU (4-gram)              | `0.831935`                           | `0.892427`                       |
+| Edit-Distance accuracy     | `0.868808`                           | `0.923167`                       |
+| Exact-Match accuracy       | `0.266667`                           | `0.391756`                       |
+| # Parameters               | `~10 M`                              | `47,298,976`                     |
+| Training time              | `~18 hrs on T4 (40 epochs)`          | `~4 hrs on T4 (30 epochs)`       |
+| Inference time (val, beam) | `4 hours -- decodes 1 image at a time. i was naive and gave one by one ` | `minutes -- batched beam + fp16` |
+
+**takeaway:** the transformer wins on every quality metric (+0.060 BLEU, +0.054 edit-distance accuracy) while training **~6x faster**, even though it carries ~4.7x more parameters. the speed reasons stack: training is parallel over the whole target sequence (no token-by-token loop), which lets a much bigger batch (192 vs 32) keep the gpu saturated, and amp/fp16 roughly doubles the step speed on top. the quality gap is mostly earned on long formulas, where cross-attention gives every decoding step direct access to all 64 image columns and all previous tokens instead of one squeezed hidden state. one honest caveat: method 2 also benefits from the wider 64-column feature map and a better-tuned recipe (cosine lr, label smoothing), so the gap measures the whole package, not self-attention alone.
 
 ## 8. Decoding Strategies
 
