@@ -1,5 +1,12 @@
 # Image to LaTeX - Computer Vision and Deep Leraning Project
 
+<!-- markdownlint-disable MD033 -->
+<video src="https://github.com/Aghaei-Dev/visual-latex-decompiler/releases/download/media/quick-review.mp4" autoplay loop playsinline controls>
+  Your browser does not support the video tag.
+</video>
+<!-- markdownlint-enable MD033 -->
+for better audio and video quality pleas clone the project and watch the `quick-review.mp4` in root of project.
+
 ## 0. Project Scope -- Two Methods
 
 This project started as a computer-vision project (CNN + biLSTM + attention). For
@@ -283,7 +290,7 @@ no warmup) diverged to nan within the first epochs, so i switched to the standar
 | **`EPOCHS`**           | 30               | the curves are flat well before 30 (section 7.2).                                                                                                                                                                                                                                                                    |
 | **`LR`**               | 3e-4             | transformers want a lower peak lr than the rnn's 1e-3 -- higher just diverges.                                                                                                                                                                                                                                       |
 | **`WARMUP_STEPS`**     | 500              | lr ramps linearly from 0 over the first 500 steps. full lr from step 0 blows up to nan.                                                                                                                                                                                                                              |
-| **`LR schedule`**       | cosine annealing | after warmup the lr decays smoothly to ~0 at epoch 30 (visible in the `lr=` column of the log) instead of the rnn's step-halving.                                                                                                                                                                                    |
+| **`LR schedule`**      | cosine annealing | after warmup the lr decays smoothly to ~0 at epoch 30 (visible in the `lr=` column of the log) instead of the rnn's step-halving.                                                                                                                                                                                    |
 | **`LABEL_SMOOTH`**     | 0.1              | spreads a little probability mass off the target token -- standard for transformer seq2seq, helps generalization. also why the loss floor sits near ~1.07 instead of near 0.                                                                                                                                         |
 | **`USE_AMP`**          | True             | mixed precision -- roughly 2x faster per step on the T4, no quality loss that i could measure.                                                                                                                                                                                                                       |
 | **`BEAM_LEN_NORM`**    | 0.7              | beam scores are divided by len^0.7, otherwise short beams always win.                                                                                                                                                                                                                                                |
@@ -425,13 +432,13 @@ training budget, and scored with the same three scripts (`bleu_score.py`,
 > prints at startup (the rnn startup log wasn't kept, so its count is computed by
 > hand from the layer dimensions); times are the wall-clock of the colab runs.
 
-| Metric                     | Method 1: CNN + biLSTM + Attention   | Method 2: CNN + Transformer      |
-| -------------------------- | ------------------------------------ | -------------------------------- |
-| BLEU (4-gram)              | `0.831935`                           | `0.892427`                       |
-| Edit-Distance accuracy     | `0.868808`                           | `0.923167`                       |
-| Exact-Match accuracy       | `0.266667`                           | `0.391756`                       |
-| # Parameters               | `~10 M`                              | `47,298,976`                     |
-| Training time              | `~18 hrs on T4 (40 epochs)`          | `~4 hrs on T4 (30 epochs)`       |
+| Metric                     | Method 1: CNN + biLSTM + Attention                                       | Method 2: CNN + Transformer      |
+| -------------------------- | ------------------------------------------------------------------------ | -------------------------------- |
+| BLEU (4-gram)              | `0.831935`                                                               | `0.892427`                       |
+| Edit-Distance accuracy     | `0.868808`                                                               | `0.923167`                       |
+| Exact-Match accuracy       | `0.266667`                                                               | `0.391756`                       |
+| # Parameters               | `~10 M`                                                                  | `47,298,976`                     |
+| Training time              | `~18 hrs on T4 (40 epochs)`                                              | `~4 hrs on T4 (30 epochs)`       |
 | Inference time (val, beam) | `4 hours -- decodes 1 image at a time. i was naive and gave one by one ` | `minutes -- batched beam + fp16` |
 
 **takeaway:** the transformer wins on every quality metric (+0.060 BLEU, +0.054 edit-distance accuracy) while training **~6x faster**, even though it carries ~4.7x more parameters. the speed reasons stack: training is parallel over the whole target sequence (no token-by-token loop), which lets a much bigger batch (192 vs 32) keep the gpu saturated, and amp/fp16 roughly doubles the step speed on top. the quality gap is mostly earned on long formulas, where cross-attention gives every decoding step direct access to all 64 image columns and all previous tokens instead of one squeezed hidden state. one honest caveat: method 2 also benefits from the wider 64-column feature map and a better-tuned recipe (cosine lr, label smoothing), so the gap measures the whole package, not self-attention alone.
