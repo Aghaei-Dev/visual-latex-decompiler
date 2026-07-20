@@ -1,6 +1,9 @@
 # Image to LaTeX - Computer Vision and Deep Leraning Project
 
+## Video for easy explanation
+
 <https://github.com/user-attachments/assets/1ddabe92-b1b0-4bfd-991b-6569ced8c63b>
+
 for better audio and video quality pleas clone the project and watch the `quick-review.mp4` in root of project or head to `release` section of this repo.
 
 ## 0. Project Scope -- Two Methods
