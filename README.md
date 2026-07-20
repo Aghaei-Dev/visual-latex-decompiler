@@ -1,11 +1,7 @@
 # Image to LaTeX - Computer Vision and Deep Leraning Project
 
-<!-- markdownlint-disable MD033 -->
-<video src="https://github.com/Aghaei-Dev/visual-latex-decompiler/releases/download/media/quick-review.mp4" autoplay loop playsinline controls>
-  Your browser does not support the video tag.
-</video>
-<!-- markdownlint-enable MD033 -->
-for better audio and video quality pleas clone the project and watch the `quick-review.mp4` in root of project.
+<https://github.com/user-attachments/assets/1ddabe92-b1b0-4bfd-991b-6569ced8c63b>
+for better audio and video quality pleas clone the project and watch the `quick-review.mp4` in root of project or head to `release` section of this repo.
 
 ## 0. Project Scope -- Two Methods
 
